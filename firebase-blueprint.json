@@ -1,0 +1,28 @@
+{
+  "entities": {
+    "Lead": {
+      "title": "Lead",
+      "description": "Information about a potential business lead.",
+      "type": "object",
+      "properties": {
+        "businessName": { "type": "string" },
+        "location": { "type": "string" },
+        "website": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "category": { "type": "string" },
+        "country": { "type": "string" },
+        "state": { "type": "string" },
+        "zip": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessName", "category", "country", "state", "zip"]
+    }
+  },
+  "firestore": {
+    "/leads/{leadId}": {
+      "schema": { "$ref": "Lead" },
+      "description": "Collection of generated leads."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Agency Lead Generator",
+  "description": "A lead generation tool for agencies to find business information and manage communications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
