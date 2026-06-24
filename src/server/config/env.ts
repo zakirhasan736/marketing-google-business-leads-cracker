@@ -15,10 +15,10 @@ export function getDatabasePath(): string {
   return process.env.DATABASE_PATH ?? "data/leads.db";
 }
 
-/** Target results per category search (Google Text Search max ~60 via pagination). */
+/** Target results per category search (Google Text Search max 60 = 3 pages × 20). */
 export function getMaxResultsPerCategory(): number {
   const raw = process.env.PLACES_MAX_RESULTS_PER_CATEGORY;
-  const parsed = raw ? parseInt(raw, 10) : 50;
-  if (Number.isNaN(parsed)) return 50;
+  const parsed = raw ? parseInt(raw, 10) : 60;
+  if (Number.isNaN(parsed)) return 60;
   return Math.min(Math.max(parsed, 1), 60);
 }

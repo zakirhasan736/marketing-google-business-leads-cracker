@@ -4,6 +4,13 @@ import {
 } from "@/server/config/env";
 import type { BusinessResult } from "@/lib/types";
 
+/** Google Text Search returns 20 results per page, max 3 pages. */
+const PLACES_PAGE_SIZE = 20;
+const PLACES_MAX_PAGES = 3;
+const PAGE_TOKEN_INITIAL_DELAY_MS = 2500;
+const PAGE_TOKEN_RETRY_DELAY_MS = 2000;
+const PAGE_TOKEN_MAX_ATTEMPTS = 6;
+
 interface TextSearchPlace {
   place_id: string;
   name: string;
@@ -36,15 +43,19 @@ async function fetchTextSearchPage(
   return response.json();
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchTextSearchPageWithRetry(
   query: string,
   pageToken?: string
 ): Promise<TextSearchResponse> {
-  const maxAttempts = pageToken ? 4 : 1;
+  const maxAttempts = pageToken ? PAGE_TOKEN_MAX_ATTEMPTS : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (pageToken && attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await delay(PAGE_TOKEN_RETRY_DELAY_MS);
     }
 
     const searchData = await fetchTextSearchPage(query, pageToken);
@@ -71,14 +82,20 @@ async function collectSearchResults(
   const collected: TextSearchPlace[] = [];
   const seenIds = new Set<string>();
   let pageToken: string | undefined;
+  let pagesFetched = 0;
+  const maxPages = Math.min(
+    PLACES_MAX_PAGES,
+    Math.ceil(maxResults / PLACES_PAGE_SIZE)
+  );
 
-  while (collected.length < maxResults) {
+  while (collected.length < maxResults && pagesFetched < maxPages) {
     if (pageToken) {
-      // Initial pause before first paginated request
-      await new Promise((resolve) => setTimeout(resolve, 2200));
+      // Google requires a short delay before next_page_token becomes valid.
+      await delay(PAGE_TOKEN_INITIAL_DELAY_MS);
     }
 
     const searchData = await fetchTextSearchPageWithRetry(query, pageToken);
+    pagesFetched++;
 
     if (searchData.status === "ZERO_RESULTS") {
       break;
@@ -87,6 +104,9 @@ async function collectSearchResults(
     if (searchData.status !== "OK") {
       // Keep partial results if pagination fails after page 1
       if (collected.length > 0) {
+        console.warn(
+          `Google Places pagination stopped on page ${pagesFetched}: ${searchData.status}${searchData.error_message ? ` — ${searchData.error_message}` : ""}`
+        );
         break;
       }
       throw new Error(
