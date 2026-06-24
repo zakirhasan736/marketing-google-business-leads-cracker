@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LeadModal } from "@/components/features/leads/LeadModal";
+import { SiteAuditModal } from "@/components/features/leads/SiteAuditModal";
 import { LeadSearchForm } from "@/components/features/leads/LeadSearchForm";
 import { LeadsTable } from "@/components/features/leads/LeadsTable";
 import { RecentSearchesSidebar } from "@/components/features/leads/RecentSearchesSidebar";
@@ -37,6 +38,7 @@ export function LeadGeneratorApp() {
   const [view, setView] = useState<View>("search");
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [activeModalLead, setActiveModalLead] = useState<Lead | null>(null);
+  const [activeAuditLead, setActiveAuditLead] = useState<Lead | null>(null);
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [snackbar, setSnackbar] = useState({ open: false, message: "" });
   const [progress, setProgress] = useState(0);
@@ -571,6 +573,7 @@ export function LeadGeneratorApp() {
                 onStopEmailScan={handleStopEmailScan}
                 onExportLeads={handleExportLeads}
                 onLeadClick={setActiveModalLead}
+                onSiteAuditClick={setActiveAuditLead}
               />
             </>
           ) : (
@@ -594,6 +597,10 @@ export function LeadGeneratorApp() {
       <LeadModal
         lead={activeModalLead}
         onClose={() => setActiveModalLead(null)}
+      />
+      <SiteAuditModal
+        lead={activeAuditLead}
+        onClose={() => setActiveAuditLead(null)}
       />
     </div>
   );

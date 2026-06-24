@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { getDatabasePath } from "@/server/config/env";
-import { LEADS_TABLE_SCHEMA } from "@/server/database/schema";
+import { LEADS_TABLE_SCHEMA, HEATMAP_REPORTS_TABLE_SCHEMA, SITE_AUDIT_REPORTS_TABLE_SCHEMA } from "@/server/database/schema";
 
 let db: Database.Database | null = null;
 
@@ -35,6 +35,8 @@ export function getDatabase(): Database.Database {
     db = new Database(dbPath);
     db.pragma("journal_mode = WAL");
     db.exec(LEADS_TABLE_SCHEMA);
+    db.exec(HEATMAP_REPORTS_TABLE_SCHEMA);
+    db.exec(SITE_AUDIT_REPORTS_TABLE_SCHEMA);
     migrateDatabase(db);
   }
 

@@ -16,3 +16,21 @@ export const LEADS_TABLE_SCHEMA = `
     updated_at TEXT NOT NULL
   )
 `;
+
+export const HEATMAP_REPORTS_TABLE_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS heatmap_reports (
+    token TEXT PRIMARY KEY,
+    business_name TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+`;
+
+export const SITE_AUDIT_REPORTS_TABLE_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS site_audit_reports (
+    token TEXT PRIMARY KEY,
+    business_name TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+`;

@@ -3,58 +3,48 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { HeatmapReportView } from "@/components/features/leads/HeatmapReportView";
-import { scanHeatmapApi } from "@/lib/api/heatmap.client";
+import { SiteAuditReportView } from "@/components/features/leads/SiteAuditReportView";
+import { runSiteAuditApi } from "@/lib/api/site-audit.client";
 import type { Lead } from "@/lib/types";
-import type { HeatmapScanResult } from "@/lib/types/heatmap";
+import type { SiteAuditResult } from "@/lib/types/site-audit";
 
-interface LeadModalProps {
+interface SiteAuditModalProps {
   lead: Lead | null;
   onClose: () => void;
 }
 
-function defaultKeyword(lead: Lead): string {
-  if (lead.searchCategory) {
-    return `${lead.searchCategory} near me`;
-  }
-  return "local business near me";
-}
-
-export function LeadModal({ lead, onClose }: LeadModalProps) {
-  const [keyword, setKeyword] = useState("");
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const [result, setResult] = useState<HeatmapScanResult | null>(null);
+export function SiteAuditModal({ lead, onClose }: SiteAuditModalProps) {
+  const [auditing, setAuditing] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [result, setResult] = useState<SiteAuditResult | null>(null);
   const [shareUrl, setShareUrl] = useState("");
 
   useEffect(() => {
     if (!lead) return;
-    setKeyword(defaultKeyword(lead));
-    setScanError(null);
+    setAuditError(null);
     setResult(null);
     setShareUrl("");
   }, [lead]);
 
-  const handleScan = async () => {
-    if (!lead || !keyword.trim()) return;
-    setScanning(true);
-    setScanError(null);
+  const canAudit = Boolean(lead?.website && lead.website !== "N/A");
+
+  const handleAudit = async () => {
+    if (!lead || !canAudit) return;
+    setAuditing(true);
+    setAuditError(null);
     try {
-      const scanResult = await scanHeatmapApi({
-        placeId: lead.placeId,
-        keyword: keyword.trim(),
-        gridSize: 7,
-        hasWebsite: Boolean(lead.website && lead.website !== "N/A"),
+      const auditResult = await runSiteAuditApi({
+        url: lead.website,
         lead,
       });
-      setResult(scanResult);
-      setShareUrl(scanResult.shareUrl ?? "");
+      setResult(auditResult);
+      setShareUrl(auditResult.shareUrl ?? "");
     } catch (error) {
-      setScanError(
-        error instanceof Error ? error.message : "Heatmap scan failed"
+      setAuditError(
+        error instanceof Error ? error.message : "Site audit failed"
       );
     } finally {
-      setScanning(false);
+      setAuditing(false);
     }
   };
 
@@ -94,15 +84,14 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
             <X size={18} />
           </button>
 
-          <HeatmapReportView
+          <SiteAuditReportView
             lead={snapshot}
             result={result}
-            scanning={scanning}
-            keyword={keyword}
-            onKeywordChange={setKeyword}
-            onScan={handleScan}
-            scanError={scanError}
+            auditing={auditing}
+            onRunAudit={handleAudit}
+            auditError={auditError}
             shareUrl={shareUrl}
+            canAudit={canAudit}
           />
         </motion.div>
       </motion.div>

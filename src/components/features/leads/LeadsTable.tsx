@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileDown, Loader2, Mail, MapPin, Trash2 } from "lucide-react";
+import { FileDown, Loader2, Mail, MapPin, Trash2, BarChart3, Gauge } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { LeadTableFiltersBar,
   DEFAULT_LEAD_FILTERS,
@@ -43,6 +43,7 @@ interface LeadsTableProps {
   onStopEmailScan?: () => void;
   onExportLeads: (leads: Lead[]) => void;
   onLeadClick: (lead: Lead) => void;
+  onSiteAuditClick: (lead: Lead) => void;
 }
 
 export function LeadsTable({
@@ -66,6 +67,7 @@ export function LeadsTable({
   onStopEmailScan,
   onExportLeads,
   onLeadClick,
+  onSiteAuditClick,
 }: LeadsTableProps) {
   const [filters, setFilters] = useState<LeadTableFilters>(DEFAULT_LEAD_FILTERS);
   const [page, setPage] = useState(1);
@@ -315,9 +317,9 @@ export function LeadsTable({
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="border-b border-neutral-100 hover:bg-neutral-50"
+                      className="border-b border-neutral-100 hover:bg-blue-50/40 group relative"
                     >
-                      <td className="p-4">
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedLeads.has(biz.placeId)}
@@ -326,11 +328,34 @@ export function LeadsTable({
                         />
                       </td>
                       <td
-                        className="p-4 font-medium text-neutral-900 cursor-pointer hover:text-blue-600 max-w-[180px] truncate"
-                        onClick={() => onLeadClick(biz)}
+                        className="p-4 font-medium text-neutral-900 max-w-[180px] truncate relative"
                         title={biz.name}
                       >
                         {biz.name}
+                        <div className="absolute inset-0 z-10 hidden group-hover:flex items-center justify-center gap-2 bg-white/95 backdrop-blur-sm border border-neutral-200 rounded-lg shadow-sm mx-1">
+                          <button
+                            type="button"
+                            onClick={() => onLeadClick(biz)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition"
+                          >
+                            <BarChart3 size={14} />
+                            Heatmap
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSiteAuditClick(biz)}
+                            disabled={!biz.website || biz.website === "N/A"}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-neutral-300 disabled:text-neutral-500 text-white text-xs font-semibold shadow-sm transition"
+                            title={
+                              !biz.website || biz.website === "N/A"
+                                ? "No website URL"
+                                : "Run website audit"
+                            }
+                          >
+                            <Gauge size={14} />
+                            Site Audit
+                          </button>
+                        </div>
                       </td>
                       <td className="p-4 text-neutral-700 text-sm max-w-[140px] truncate" title={biz.searchCategory ?? ""}>
                         {biz.searchCategory || "—"}
@@ -343,7 +368,7 @@ export function LeadsTable({
                         )}
                         <div className="text-neutral-500">{loc.country || "—"}</div>
                       </td>
-                      <td className="p-4 text-neutral-700 text-xs max-w-[220px]">
+                      <td className="p-4 text-neutral-700 text-xs max-w-[220px]" onClick={(e) => e.stopPropagation()}>
                         {biz.address ? (
                           <a
                             href={getLeadMapsUrl(biz)}
@@ -362,7 +387,7 @@ export function LeadsTable({
                           "—"
                         )}
                       </td>
-                      <td className="p-4 text-neutral-700 text-sm">
+                      <td className="p-4 text-neutral-700 text-sm" onClick={(e) => e.stopPropagation()}>
                         <EditableEmailCell
                           placeId={biz.placeId}
                           email={biz.email}
@@ -374,7 +399,7 @@ export function LeadsTable({
                       <td className="p-4 text-neutral-700 text-sm whitespace-nowrap">
                         {biz.phone}
                       </td>
-                      <td className="p-4">
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         <select
                           value={biz.status || "New"}
                           onChange={(e) =>
@@ -393,7 +418,7 @@ export function LeadsTable({
                           ))}
                         </select>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         {biz.website && biz.website !== "N/A" ? (
                           <a
                             href={biz.website}
@@ -407,7 +432,7 @@ export function LeadsTable({
                           "N/A"
                         )}
                       </td>
-                      <td className="p-4">
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         <input
                           value={biz.note || ""}
                           onChange={(e) =>
@@ -418,14 +443,35 @@ export function LeadsTable({
                           placeholder="Notes..."
                         />
                       </td>
-                      <td className="p-4">
-                        <button
-                          onClick={() => onDeleteSingle(biz.placeId)}
-                          disabled={deleting}
-                          className="text-red-500 hover:text-red-700 disabled:opacity-40"
-                        >
-                          Delete
-                        </button>
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onLeadClick(biz)}
+                            className="text-blue-600 hover:text-blue-800 text-sm font-semibold inline-flex items-center gap-1"
+                            title="Open SEO heatmap report"
+                          >
+                            <BarChart3 size={14} />
+                            Heatmap
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSiteAuditClick(biz)}
+                            disabled={!biz.website || biz.website === "N/A"}
+                            className="text-violet-600 hover:text-violet-800 disabled:text-neutral-400 text-sm font-semibold inline-flex items-center gap-1"
+                            title="Run website audit"
+                          >
+                            <Gauge size={14} />
+                            Audit
+                          </button>
+                          <button
+                            onClick={() => onDeleteSingle(biz.placeId)}
+                            disabled={deleting}
+                            className="text-red-500 hover:text-red-700 disabled:opacity-40"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </motion.tr>
                   );
