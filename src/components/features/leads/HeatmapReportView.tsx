@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   AlertTriangle,
   CheckCircle2,
   Copy,
   ExternalLink,
+  FileDown,
+  FileSpreadsheet,
+  Info,
   Link2,
   Loader2,
   Mail,
@@ -13,11 +17,21 @@ import {
   Phone,
   Search,
   Star,
+  X,
 } from "lucide-react";
 import { HeatmapMapViewer } from "@/components/features/leads/HeatmapMapViewer";
-import type { HeatmapScanResult, PublicHeatmapLeadSnapshot } from "@/lib/types/heatmap";
+import type {
+  HeatmapCompetitor,
+  HeatmapScanResult,
+  PublicHeatmapLeadSnapshot,
+} from "@/lib/types/heatmap";
 import { getRankStyle, HEATMAP_LEGEND } from "@/lib/utils/heatmap-colors";
+import { getHeatmapCoverageInfo } from "@/lib/utils/heatmap-coverage";
 import { getLeadMapsUrl } from "@/lib/utils/google-maps";
+import {
+  downloadHeatmapCsv,
+  downloadHeatmapPdf,
+} from "@/lib/utils/export-heatmap";
 
 export interface HeatmapReportViewProps {
   lead: PublicHeatmapLeadSnapshot;
@@ -29,6 +43,7 @@ export interface HeatmapReportViewProps {
   onScan?: () => void;
   scanError?: string | null;
   shareUrl?: string;
+  onClose?: () => void;
 }
 
 export function HeatmapReportView({
@@ -41,9 +56,16 @@ export function HeatmapReportView({
   onScan,
   scanError,
   shareUrl,
+  onClose,
 }: HeatmapReportViewProps) {
   const [copiedPitch, setCopiedPitch] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [mapInfoOpen, setMapInfoOpen] = useState(false);
+
+  useEffect(() => {
+    setMapInfoOpen(false);
+  }, [result?.keyword, lead.placeId]);
 
   const gridCells = useMemo(() => {
     if (!result) return [];
@@ -66,6 +88,7 @@ export function HeatmapReportView({
   const rating = result?.business.rating ?? null;
   const reviewCount = result?.business.userRatingsTotal ?? null;
   const rankStyle = centerCell ? getRankStyle(centerCell.rank) : null;
+  const coverageInfo = result ? getHeatmapCoverageInfo(result) : null;
 
   const mapsLead = {
     placeId: lead.placeId,
@@ -96,272 +119,538 @@ export function HeatmapReportView({
     }
   };
 
+  const handleExportCsv = () => {
+    if (!result) return;
+    downloadHeatmapCsv(lead, result);
+  };
+
+  const handleExportPdf = async () => {
+    if (!result || exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      await downloadHeatmapPdf(lead, result);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full min-h-0 bg-neutral-50">
-      {/* Header */}
-      <header className="shrink-0 bg-white border-b border-neutral-200 px-5 py-3">
-        <div className="flex items-start justify-between gap-3">
+    <div className="relative flex flex-col h-full min-h-0 bg-zinc-50">
+      {/* ── Header + metrics ── */}
+      <header className="relative shrink-0 border-b border-slate-200/70 bg-white">
+        <div className="h-0.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-400" aria-hidden />
+
+        <div className="flex items-start gap-3 px-5 pt-3.5 pb-3 pr-12">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                {readOnly ? "Shared SEO Report" : "SEO Report"}
-              </span>
-              {result && (
-                <span
-                  className="text-[10px] font-bold uppercase tracking-widest text-white px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: result.insights.gradeColor }}
-                >
-                  Grade {result.insights.grade}
-                </span>
-              )}
-            </div>
-            <h1 className="text-lg sm:text-xl font-bold text-neutral-900 truncate mt-1">
+            <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">
+              {readOnly ? "Shared report" : "Local SEO heatmap"}
+            </p>
+            <h1 className="text-[17px] sm:text-lg font-semibold text-slate-900 tracking-tight truncate mt-1">
               {lead.name}
             </h1>
-            <p className="text-xs text-neutral-500 truncate">{lead.address}</p>
-            <ContactChips lead={lead} rating={rating} reviewCount={reviewCount} mapsLead={mapsLead} />
+            <p className="text-xs text-slate-500 truncate mt-0.5">{lead.address}</p>
           </div>
+
+          {result && (
+            <div
+              className="shrink-0 flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1 border"
+              style={{
+                backgroundColor: `${result.insights.gradeColor}10`,
+                borderColor: `${result.insights.gradeColor}30`,
+              }}
+            >
+              <span
+                className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-white"
+                style={{ backgroundColor: result.insights.gradeColor }}
+              >
+                {result.insights.grade}
+              </span>
+              <span className="text-[10px] font-medium text-slate-600">Grade</span>
+            </div>
+          )}
         </div>
 
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 z-20 w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            aria-label="Close"
+          >
+            <X size={16} />
+          </button>
+        )}
+
         {!readOnly && (
-          <div className="flex gap-2 mt-3">
-            <input
-              value={keyword}
-              onChange={(e) => onKeywordChange?.(e.target.value)}
-              disabled={scanning}
-              placeholder='Keyword — e.g. "HVAC near me"'
-              className="flex-1 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm bg-neutral-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-60"
-              onKeyDown={(e) => e.key === "Enter" && onScan?.()}
-            />
-            <button
-              onClick={onScan}
-              disabled={scanning || !keyword.trim()}
-              className="shrink-0 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-5 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition"
-            >
-              {scanning ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <Search size={16} />
-              )}
-              {scanning ? "Scanning…" : "Scan Area"}
-            </button>
+          <div className="px-5 pb-3.5">
+            <div className="flex gap-2 p-1 rounded-xl bg-slate-100/80 border border-slate-200/60">
+              <div className="relative flex-1">
+                <Search
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                />
+                <input
+                  value={keyword}
+                  onChange={(e) => onKeywordChange?.(e.target.value)}
+                  disabled={scanning}
+                  placeholder='Keyword — "plumber near me"'
+                  className="w-full bg-white rounded-lg pl-9 pr-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:opacity-50"
+                  onKeyDown={(e) => e.key === "Enter" && onScan?.()}
+                />
+              </div>
+              <button
+                onClick={onScan}
+                disabled={scanning || !keyword.trim()}
+                className="shrink-0 px-4 py-2 rounded-lg text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500 transition-colors"
+              >
+                {scanning ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 size={14} className="animate-spin" />
+                    Scanning
+                  </span>
+                ) : (
+                  "Scan area"
+                )}
+              </button>
+            </div>
           </div>
         )}
 
         {readOnly && result && (
-          <p className="text-xs text-neutral-500 mt-2">
-            Keyword: <strong className="text-neutral-700">{result.keyword}</strong>
+          <p className="px-5 pb-3 text-xs text-slate-500">
+            Keyword <span className="text-slate-800 font-medium">{result.keyword}</span>
           </p>
         )}
 
+        {result && (
+          <div className="px-5 pb-3.5 pt-0 border-t border-slate-100 bg-slate-50/50">
+            <div className="grid grid-cols-4 gap-2">
+              <MetricTile
+                label="Rank at pin"
+                value={result.insights.businessRankLabel}
+                accent={rankStyle?.backgroundColor ?? "#dc2626"}
+              />
+              <MetricTile
+                label="Visibility"
+                value={String(result.insights.visibilityScore)}
+                accent={result.insights.gradeColor}
+              />
+              <MetricTile
+                label="Top 3"
+                value={`${result.summary.top3Percent}%`}
+                accent="#059669"
+              />
+              <MetricTile
+                label="Blind spots"
+                value={`${result.summary.notRankingPercent}%`}
+                accent="#dc2626"
+              />
+            </div>
+            {result.insights.issues[0] && (
+              <p className="mt-2 text-[11px] text-amber-800/90 flex items-center gap-1.5 truncate">
+                <span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" />
+                {result.insights.issues[0]}
+              </p>
+            )}
+          </div>
+        )}
+      </header>
+
+      {/* Meta + share */}
+      <div className="shrink-0 bg-white border-b border-zinc-200/80 px-4 py-2.5">
+        <ContactChips
+          lead={lead}
+          rating={rating}
+          reviewCount={reviewCount}
+          mapsLead={mapsLead}
+        />
+
         {scanError && (
-          <p className="text-xs text-red-600 mt-2 bg-red-50 rounded-lg px-3 py-2">
+          <p className="text-xs text-red-600 mt-2.5 bg-red-50 rounded-lg px-3 py-2 border border-red-100">
             {scanError}
           </p>
         )}
 
         {shareUrl && result && (
-          <div className="mt-3 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center bg-green-50 border border-green-200 rounded-xl px-3 py-2">
+          <div className="mt-3 flex flex-col sm:flex-row gap-2 items-stretch sm:items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <Link2 size={14} className="text-green-700 shrink-0" />
-              <span className="text-xs text-green-800 truncate font-medium">
-                {shareUrl}
-              </span>
+              <Link2 size={14} className="text-zinc-500 shrink-0" />
+              <span className="text-xs text-zinc-600 truncate">{shareUrl}</span>
             </div>
             <button
               type="button"
               onClick={handleCopyLink}
-              className="shrink-0 text-xs font-semibold bg-green-700 hover:bg-green-800 text-white px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition"
+              className="shrink-0 text-xs font-medium text-zinc-700 hover:text-zinc-900 bg-white border border-zinc-200 hover:border-zinc-300 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition"
             >
               <Copy size={12} />
-              {copiedLink ? "Link copied!" : "Copy client link"}
+              {copiedLink ? "Copied" : "Copy link"}
             </button>
           </div>
         )}
-      </header>
 
-      {/* KPI strip */}
-      {result && (
-        <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-px bg-neutral-200 border-b border-neutral-200">
-          <KpiCell
-            label="Your rank at pin"
-            value={result.insights.businessRankLabel}
-            color={rankStyle?.backgroundColor ?? "#dc2626"}
-            sub="At your business location"
-          />
-          <KpiCell
-            label="Visibility score"
-            value={`${result.insights.visibilityScore}`}
-            color={result.insights.gradeColor}
-            sub={result.insights.gradeLabel}
-          />
-          <KpiCell
-            label="Top 3 coverage"
-            value={`${result.summary.top3Percent}%`}
-            color="#22c55e"
-            sub={`${result.summary.top3Count}/${result.cells.length} points`}
-          />
-          <KpiCell
-            label="Blind spots"
-            value={`${result.summary.notRankingPercent}%`}
-            color="#dc2626"
-            sub={`${result.summary.notRankingCount} areas off page 1`}
-          />
-        </div>
-      )}
+      </div>
 
-      {/* Body */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden">
-        <aside className="hidden lg:flex lg:col-span-2 flex-col border-r border-neutral-200 bg-white overflow-y-auto">
-          {result ? (
-            <div className="p-4 space-y-4">
-              <SectionLabel>Legend</SectionLabel>
-              <div className="space-y-1.5">
+      {/* ── Workspace ── */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+        {/* Rankings */}
+        <aside className="hidden lg:flex lg:col-span-3 flex-col min-h-0 bg-white border-r border-zinc-200/80">
+          <PanelHeader title="Rankings at pin" />
+          {!result ? (
+            <EmptyPanel text={readOnly ? "No data" : "Run a scan to see competitors."} />
+          ) : (
+            <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-4 py-3 space-y-1">
+                {result.competitors.length > 0 ? (
+                  result.competitors.map((c) => (
+                    <CompetitorRow key={c.placeId} competitor={c} />
+                  ))
+                ) : (
+                  <p className="text-xs text-zinc-400 py-4 text-center">No competitors found.</p>
+                )}
+              </div>
+              <div className="shrink-0 px-4 py-3 border-t border-zinc-100 flex items-center gap-2">
+                <ToolbarButton
+                  onClick={handleCopyPitch}
+                  title={copiedPitch ? "Copied" : "Copy pitch"}
+                  active={copiedPitch}
+                >
+                  <Copy size={15} />
+                </ToolbarButton>
+                <ToolbarButton onClick={handleExportCsv} title="Export CSV">
+                  <FileSpreadsheet size={15} />
+                </ToolbarButton>
+                <ToolbarButton
+                  onClick={handleExportPdf}
+                  title="Export PDF"
+                  disabled={exportingPdf}
+                >
+                  {exportingPdf ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : (
+                    <FileDown size={15} />
+                  )}
+                </ToolbarButton>
+              </div>
+            </div>
+          )}
+        </aside>
+
+        {/* Map */}
+        <main className="lg:col-span-6 flex flex-col min-h-0 min-h-[280px] bg-zinc-100 relative">
+          {scanning && !result && <ScanningState />}
+          {!result && !scanning && !readOnly && <ReadyState />}
+          {result && (
+            <div className="flex-1 min-h-0 relative p-2 flex flex-col">
+              <HeatmapMapViewer
+                mapUrl={result.mapUrl}
+                gridSize={result.gridSize}
+                gridCells={gridCells}
+                className="flex-1 min-h-0 m-0"
+              />
+              <MapInfoOverlay
+                open={mapInfoOpen}
+                onToggle={() => setMapInfoOpen((v) => !v)}
+                coverageInfo={coverageInfo}
+                result={result}
+              />
+            </div>
+          )}
+        </main>
+
+        {/* Insights */}
+        <aside className="lg:col-span-3 flex flex-col min-h-0 bg-white border-t lg:border-t-0 lg:border-l border-zinc-200/80 max-h-[340px] lg:max-h-none">
+          <PanelHeader title="Report insights" />
+          {!result ? (
+            <EmptyPanel text={readOnly ? "Unavailable" : "Insights appear after scan."} />
+          ) : (
+            <>
+              <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-4 py-3 space-y-4">
+                {result.competitors.length > 0 && (
+                  <div className="lg:hidden space-y-1">
+                    <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-2">
+                      Rankings
+                    </p>
+                    {result.competitors.map((c) => (
+                      <CompetitorRow key={c.placeId} competitor={c} />
+                    ))}
+                  </div>
+                )}
+                <InsightBlock
+                  title="Problems found"
+                  items={result.insights.issues}
+                  variant="issue"
+                />
+                <InsightBlock
+                  title="How we can help"
+                  items={result.insights.opportunities}
+                  variant="win"
+                />
+              </div>
+              <div className="lg:hidden shrink-0 px-4 py-3 border-t border-zinc-100 flex justify-end gap-2">
+                <ToolbarButton onClick={handleCopyPitch} title="Copy pitch" active={copiedPitch}>
+                  <Copy size={15} />
+                </ToolbarButton>
+                <ToolbarButton onClick={handleExportCsv} title="CSV">
+                  <FileSpreadsheet size={15} />
+                </ToolbarButton>
+                <ToolbarButton onClick={handleExportPdf} title="PDF" disabled={exportingPdf}>
+                  {exportingPdf ? <Loader2 size={15} className="animate-spin" /> : <FileDown size={15} />}
+                </ToolbarButton>
+              </div>
+            </>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Sub-components ─── */
+
+function MetricTile({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: string;
+}) {
+  return (
+    <div className="rounded-lg bg-white border border-slate-200/70 px-2 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <p className="text-[9px] font-medium uppercase tracking-wide text-slate-400 truncate">
+        {label}
+      </p>
+      <p
+        className="text-base sm:text-lg font-semibold tabular-nums leading-tight mt-0.5 truncate"
+        style={{ color: accent }}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function PanelHeader({ title }: { title: string }) {
+  return (
+    <div className="shrink-0 px-4 py-3 border-b border-zinc-100">
+      <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">{title}</p>
+    </div>
+  );
+}
+
+function EmptyPanel({ text }: { text: string }) {
+  return (
+    <div className="flex-1 flex items-center justify-center p-6 text-xs text-zinc-400 text-center">
+      {text}
+    </div>
+  );
+}
+
+function ScanningState() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8">
+      <div className="w-12 h-12 rounded-full border-2 border-zinc-300 border-t-zinc-800 animate-spin" />
+      <p className="text-sm font-medium text-zinc-700">Scanning 7×7 grid</p>
+      <p className="text-xs text-zinc-400">Live Google Maps · 30–60 seconds</p>
+    </div>
+  );
+}
+
+function ReadyState() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-white border border-zinc-200 flex items-center justify-center">
+        <MapPin size={24} className="text-zinc-400" />
+      </div>
+      <div>
+        <p className="text-sm font-medium text-zinc-800">Ready to scan</p>
+        <p className="text-xs text-zinc-400 mt-1 max-w-[240px]">
+          Enter a keyword and run a scan to generate your local visibility heatmap.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MapInfoOverlay({
+  open,
+  onToggle,
+  coverageInfo,
+  result,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  coverageInfo: ReturnType<typeof getHeatmapCoverageInfo> | null;
+  result: HeatmapScanResult;
+}) {
+  return (
+    <div className="absolute top-3 left-3 z-30 flex flex-col items-start gap-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={open ? "Hide map info" : "Show map info"}
+        aria-expanded={open}
+        className={`w-9 h-9 flex items-center justify-center rounded-lg border shadow-sm transition-colors ${
+          open
+            ? "bg-zinc-900 border-zinc-800 text-white"
+            : "bg-white border-zinc-200/90 text-zinc-600 hover:bg-zinc-50"
+        }`}
+      >
+        {open ? <X size={16} /> : <Info size={16} />}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18 }}
+            className="w-[220px] rounded-xl bg-white border border-zinc-200 shadow-xl p-3 space-y-3"
+          >
+            <div>
+              <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-2">
+                Legend
+              </p>
+              <div className="space-y-1">
                 {HEATMAP_LEGEND.map((item) => (
-                  <div
-                    key={item.legendLabel}
-                    className="flex items-center gap-2 text-[11px] text-neutral-600"
-                  >
+                  <div key={item.legendLabel} className="flex items-center gap-2 text-[11px] text-zinc-600">
                     <span
-                      className="w-3.5 h-3.5 rounded-full shrink-0"
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: item.backgroundColor }}
                     />
                     {item.legendLabel}
                   </div>
                 ))}
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-blue-700 font-medium pt-2 border-t border-neutral-100">
-                <MapPin size={11} className="fill-blue-600 text-blue-600" />
+              <p className="text-[10px] text-zinc-500 mt-2 pt-2 border-t border-zinc-100 flex items-center gap-1">
+                <MapPin size={10} className="text-blue-600 fill-blue-600" />
                 Blue pin = your business
-              </div>
-              <SectionLabel>Coverage</SectionLabel>
-              <MiniStat label="Avg rank" value={String(result.summary.avgRank)} />
-              <MiniStat label="Page 1" value={`${result.summary.page1Percent}%`} />
-              <MiniStat label="Top 3" value={`${result.summary.top3Percent}%`} />
-              <MiniStat label="Keyword" value={result.keyword} small />
-            </div>
-          ) : (
-            <div className="p-4 text-xs text-neutral-400">
-              {readOnly ? "No data" : "Scan to see legend and stats."}
-            </div>
-          )}
-        </aside>
-
-        <main className="lg:col-span-7 flex flex-col min-h-0 bg-neutral-100 min-h-[280px] lg:min-h-0">
-          {scanning && !result && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
-              <Loader2 size={36} className="animate-spin text-blue-600" />
-              <p className="text-sm font-semibold text-neutral-700">
-                Scanning 7×7 grid…
-              </p>
-              <p className="text-xs text-neutral-400 text-center max-w-xs">
-                Live Google Maps search — 30–60 seconds
               </p>
             </div>
-          )}
-
-          {!result && !scanning && !readOnly && (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-white border flex items-center justify-center shadow-sm">
-                <MapPin size={28} className="text-blue-500" />
-              </div>
-              <p className="font-semibold text-neutral-700">Ready to scan</p>
-              <p className="text-sm text-neutral-400 max-w-sm">
-                Click <strong>Scan Area</strong> to generate the heatmap and a
-                shareable client link.
-              </p>
-            </div>
-          )}
-
-          {result && (
-            <HeatmapMapViewer
-              mapUrl={result.mapUrl}
-              gridSize={result.gridSize}
-              gridCells={gridCells}
-            />
-          )}
-        </main>
-
-        <aside className="lg:col-span-3 flex flex-col min-h-0 border-t lg:border-t-0 lg:border-l border-neutral-200 bg-white overflow-hidden max-h-[320px] lg:max-h-none">
-          {!result ? (
-            <div className="flex-1 flex items-center justify-center p-6 text-xs text-neutral-400 text-center">
-              {readOnly
-                ? "Report data unavailable."
-                : "Competitors and insights appear after scan."}
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 flex flex-col">
-              {result.competitors.length > 0 && (
-                <div className="shrink-0 border-b border-neutral-100 p-4">
-                  <SectionLabel>Rankings at your pin</SectionLabel>
-                  <div className="mt-2 space-y-1 max-h-[120px] overflow-y-auto pr-1">
-                    {result.competitors.map((c) => (
-                      <div
-                        key={c.placeId}
-                        className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
-                          c.isTarget
-                            ? "bg-blue-50 border border-blue-200 font-semibold"
-                            : "bg-neutral-50"
-                        }`}
-                      >
-                        <span
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 ${
-                            c.isTarget ? "bg-blue-600" : "bg-neutral-400"
-                          }`}
-                        >
-                          {c.rank}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-neutral-800">
-                            {c.name}
-                            {c.isTarget && (
-                              <span className="text-blue-600 ml-1">← YOU</span>
-                            )}
-                          </p>
-                          <p className="text-[10px] text-neutral-400">
-                            {c.rating != null ? `${c.rating.toFixed(1)}★` : "—"}
-                            {c.userRatingsTotal != null &&
-                              ` · ${c.userRatingsTotal.toLocaleString()} reviews`}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-                <CompactInsightList
-                  title="Problems found"
-                  items={result.insights.issues}
-                  variant="issue"
-                />
-                <CompactInsightList
-                  title="How we can help"
-                  items={result.insights.opportunities}
-                  variant="win"
-                />
-              </div>
-
-              <div className="shrink-0 border-t border-neutral-200 p-4 bg-neutral-50">
-                <SectionLabel>Outreach pitch</SectionLabel>
-                <p className="text-[11px] text-neutral-500 mt-1 mb-2 line-clamp-3 leading-relaxed">
-                  {result.insights.pitch}
+            {coverageInfo && (
+              <div className="rounded-lg bg-zinc-50 border border-zinc-100 p-2.5">
+                <p className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                  Coverage
                 </p>
-                <button
-                  type="button"
-                  onClick={handleCopyPitch}
-                  className="w-full flex items-center justify-center gap-2 bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold py-2.5 rounded-xl transition"
-                >
-                  <Copy size={13} />
-                  {copiedPitch ? "Copied!" : "Copy pitch message"}
-                </button>
+                <p className="text-xs font-semibold text-zinc-800 mt-1">{coverageInfo.shortLabel}</p>
+                <p className="text-[10px] text-zinc-500 mt-0.5 leading-relaxed">
+                  {coverageInfo.detailLabel}
+                </p>
+                <div className="mt-2 pt-2 border-t border-zinc-200/60 space-y-1">
+                  <MiniStat label="Avg rank" value={String(result.summary.avgRank)} />
+                  <MiniStat label="Page 1" value={`${result.summary.page1Percent}%`} />
+                  <MiniStat label="Top 3" value={`${result.summary.top3Percent}%`} />
+                </div>
               </div>
-            </div>
-          )}
-        </aside>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function CompetitorRow({ competitor: c }: { competitor: HeatmapCompetitor }) {
+  const rankBadge = getRankStyle(c.rank);
+  return (
+    <div
+      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs ${
+        c.isTarget
+          ? "bg-blue-50 border border-blue-100"
+          : "hover:bg-zinc-50 border border-transparent"
+      }`}
+    >
+      <span
+        className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+        style={{ backgroundColor: rankBadge.backgroundColor }}
+      >
+        {rankBadge.label}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className={`truncate text-zinc-800 ${c.isTarget ? "font-semibold" : ""}`}>
+          {c.name}
+          {c.isTarget && <span className="text-blue-600 font-normal ml-1">· you</span>}
+        </p>
+        <p className="text-[10px] text-zinc-400 mt-0.5">
+          {c.rating != null ? `${c.rating.toFixed(1)} ★` : "—"}
+          {c.userRatingsTotal != null && ` · ${c.userRatingsTotal.toLocaleString()}`}
+        </p>
       </div>
     </div>
+  );
+}
+
+function InsightBlock({
+  title,
+  items,
+  variant,
+}: {
+  title: string;
+  items: string[];
+  variant: "issue" | "win";
+}) {
+  const isIssue = variant === "issue";
+  return (
+    <div>
+      <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-2">
+        {title}
+      </p>
+      {items.length === 0 ? (
+        <p className="text-xs text-zinc-400">None identified.</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li
+              key={item}
+              className={`flex gap-2 text-xs leading-relaxed rounded-lg px-2.5 py-2 ${
+                isIssue
+                  ? "bg-red-50/80 text-red-800 border border-red-100/80"
+                  : "bg-emerald-50/80 text-emerald-800 border border-emerald-100/80"
+              }`}
+            >
+              {isIssue ? (
+                <AlertTriangle size={13} className="shrink-0 mt-0.5 text-red-500" />
+              ) : (
+                <CheckCircle2 size={13} className="shrink-0 mt-0.5 text-emerald-500" />
+              )}
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ToolbarButton({
+  onClick,
+  title,
+  children,
+  active = false,
+  disabled = false,
+}: {
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className={`w-9 h-9 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 ${
+        active
+          ? "bg-emerald-600 border-emerald-600 text-white"
+          : "bg-white border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -377,31 +666,27 @@ function ContactChips({
   mapsLead: { placeId: string; name: string; address: string; mapsUrl: null };
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-neutral-600">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-zinc-600">
       {lead.searchCategory && (
-        <span className="bg-neutral-100 px-2 py-0.5 rounded-md font-medium">
-          {lead.searchCategory}
-        </span>
+        <span className="text-zinc-500">{lead.searchCategory}</span>
       )}
       {(rating != null || reviewCount != null) && (
         <span className="flex items-center gap-1">
           <Star size={12} className="text-amber-400 fill-amber-400" />
-          <strong>{rating?.toFixed(1) ?? "—"}</strong>
+          <span className="font-medium text-zinc-800">{rating?.toFixed(1) ?? "—"}</span>
           {reviewCount != null && (
-            <span className="text-neutral-400">
-              ({reviewCount.toLocaleString()} reviews)
-            </span>
+            <span className="text-zinc-400">({reviewCount.toLocaleString()})</span>
           )}
         </span>
       )}
       {lead.phone && lead.phone !== "N/A" && (
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1 text-zinc-500">
           <Phone size={11} />
           {lead.phone}
         </span>
       )}
       {lead.email && (
-        <span className="flex items-center gap-1 truncate max-w-[180px]">
+        <span className="flex items-center gap-1 truncate max-w-[180px] text-zinc-500">
           <Mail size={11} />
           {lead.email}
         </span>
@@ -410,7 +695,7 @@ function ContactChips({
         href={getLeadMapsUrl(mapsLead)}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1 text-blue-600 hover:underline"
+        className="flex items-center gap-1 text-zinc-700 hover:text-zinc-900 transition"
       >
         <MapPin size={11} />
         Maps
@@ -421,100 +706,22 @@ function ContactChips({
           href={lead.website}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-600 hover:underline truncate max-w-[160px]"
+          className="text-zinc-700 hover:text-zinc-900 truncate max-w-[160px] transition"
         >
           Website ↗
         </a>
       ) : (
-        <span className="text-red-500 font-medium">No website</span>
+        <span className="text-red-500">No website</span>
       )}
     </div>
   );
 }
 
-function SectionLabel({ children }: { children: ReactNode }) {
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
-      {children}
-    </p>
-  );
-}
-
-function KpiCell({
-  label,
-  value,
-  color,
-  sub,
-}: {
-  label: string;
-  value: string;
-  color: string;
-  sub: string;
-}) {
-  return (
-    <div className="bg-white px-4 py-3">
-      <p className="text-[10px] font-medium text-neutral-500 uppercase tracking-wide">
-        {label}
-      </p>
-      <p className="text-2xl font-black leading-tight" style={{ color }}>
-        {value}
-      </p>
-      <p className="text-[10px] text-neutral-400 mt-0.5 truncate">{sub}</p>
-    </div>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  small = false,
-}: {
-  label: string;
-  value: string;
-  small?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-[11px] text-neutral-500">{label}</span>
-      <span
-        className={`font-bold text-neutral-800 text-right ${small ? "text-[10px] max-w-[100px] truncate" : "text-sm"}`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function CompactInsightList({
-  title,
-  items,
-  variant,
-}: {
-  title: string;
-  items: string[];
-  variant: "issue" | "win";
-}) {
-  if (items.length === 0) return null;
-  return (
-    <div>
-      <SectionLabel>{title}</SectionLabel>
-      <ul className="mt-1.5 space-y-1">
-        {items.map((item) => (
-          <li
-            key={item}
-            className={`flex items-start gap-1.5 text-[11px] leading-snug ${
-              variant === "issue" ? "text-red-700" : "text-green-700"
-            }`}
-          >
-            {variant === "issue" ? (
-              <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-            ) : (
-              <CheckCircle2 size={11} className="shrink-0 mt-0.5" />
-            )}
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="flex items-center justify-between gap-2 text-[11px]">
+      <span className="text-zinc-500">{label}</span>
+      <span className="font-medium text-zinc-800 tabular-nums">{value}</span>
     </div>
   );
 }

@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
-import { HeatmapReportView } from "@/components/features/leads/HeatmapReportView";
+import { motion, AnimatePresence } from "motion/react";import { HeatmapReportView } from "@/components/features/leads/HeatmapReportView";
 import { scanHeatmapApi } from "@/lib/api/heatmap.client";
 import type { Lead } from "@/lib/types";
 import type { HeatmapScanResult } from "@/lib/types/heatmap";
@@ -76,24 +75,18 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 sm:p-4"
+        transition={{ duration: 0.2 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-zinc-950/60 backdrop-blur-[6px]"
         onClick={onClose}
       >
         <motion.div
-          initial={{ scale: 0.97, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.97, opacity: 0 }}
-          className="bg-neutral-50 rounded-2xl w-full max-w-[1400px] h-[min(92vh,900px)] flex flex-col shadow-2xl overflow-hidden border border-neutral-200 relative"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 12 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          className="relative flex flex-col w-full max-w-[1380px] h-[min(92vh,880px)] overflow-hidden rounded-2xl bg-white shadow-[0_24px_80px_-12px_rgba(0,0,0,0.45)] ring-1 ring-zinc-950/5"
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            onClick={onClose}
-            className="absolute top-3 right-3 z-20 p-2 bg-white/90 hover:bg-white rounded-xl shadow-sm border border-neutral-200 transition"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
-
           <HeatmapReportView
             lead={snapshot}
             result={result}
@@ -103,6 +96,7 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
             onScan={handleScan}
             scanError={scanError}
             shareUrl={shareUrl}
+            onClose={onClose}
           />
         </motion.div>
       </motion.div>

@@ -12,12 +12,14 @@ interface HeatmapMapViewerProps {
   mapUrl: string;
   gridSize: number;
   gridCells: (HeatmapCell | null)[][];
+  className?: string;
 }
 
 export function HeatmapMapViewer({
   mapUrl,
   gridSize,
   gridCells,
+  className = "m-3",
 }: HeatmapMapViewerProps) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -61,7 +63,9 @@ export function HeatmapMapViewer({
   };
 
   return (
-    <div className="flex-1 min-h-0 relative m-3 rounded-xl overflow-hidden border border-neutral-200 shadow-sm bg-neutral-200">
+    <div
+      className={`flex-1 min-h-0 relative overflow-hidden rounded-xl bg-zinc-200 ${className}`}
+    >
       <div
         ref={containerRef}
         className={`absolute inset-0 overflow-hidden touch-none ${
@@ -88,11 +92,8 @@ export function HeatmapMapViewer({
           />
 
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[58%] z-20 pointer-events-none flex flex-col items-center">
-            <MapPin
-              size={30}
-              className="text-blue-600 fill-blue-600 drop-shadow-lg"
-            />
-            <span className="bg-blue-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow -mt-0.5">
+            <MapPin size={28} className="text-blue-600 fill-blue-600 drop-shadow-md" />
+            <span className="bg-zinc-900 text-white text-[9px] font-medium px-2 py-0.5 rounded-md -mt-0.5">
               YOU
             </span>
           </div>
@@ -113,10 +114,10 @@ export function HeatmapMapViewer({
                   className="flex items-center justify-center"
                 >
                   <div
-                    className={`rounded-full flex items-center justify-center font-bold text-white shadow select-none ${
+                    className={`rounded-full flex items-center justify-center font-semibold text-white shadow-md select-none ${
                       cell.isCenter
-                        ? "w-10 h-10 sm:w-12 sm:h-12 text-sm ring-[3px] ring-blue-500 ring-offset-1"
-                        : "w-7 h-7 sm:w-8 sm:h-8 text-[10px] sm:text-xs"
+                        ? "w-10 h-10 sm:w-11 sm:h-11 text-sm ring-2 ring-white ring-offset-1 ring-offset-blue-500"
+                        : "w-7 h-7 sm:w-8 sm:h-8 text-[10px]"
                     }`}
                     style={{ backgroundColor: style.backgroundColor }}
                     title={
@@ -134,21 +135,20 @@ export function HeatmapMapViewer({
         </div>
       </div>
 
-      {/* Zoom controls */}
-      <div className="absolute bottom-3 right-3 z-30 flex flex-col gap-1 bg-white/95 backdrop-blur rounded-xl shadow-md border border-neutral-200 p-1">
+      <div className="absolute bottom-3 right-3 z-30 flex flex-col gap-0.5 bg-white rounded-lg shadow-md border border-zinc-200/90 p-0.5">
         <MapControlButton onClick={zoomIn} label="Zoom in">
-          <Plus size={16} />
+          <Plus size={15} />
         </MapControlButton>
         <MapControlButton onClick={zoomOut} label="Zoom out" disabled={scale <= MIN_SCALE}>
-          <Minus size={16} />
+          <Minus size={15} />
         </MapControlButton>
-        <MapControlButton onClick={resetView} label="Reset view" disabled={scale === 1 && pan.x === 0 && pan.y === 0}>
-          <RotateCcw size={14} />
+        <MapControlButton
+          onClick={resetView}
+          label="Reset view"
+          disabled={scale === 1 && pan.x === 0 && pan.y === 0}
+        >
+          <RotateCcw size={13} />
         </MapControlButton>
-      </div>
-
-      <div className="absolute bottom-3 left-3 z-30 bg-white/90 backdrop-blur text-[10px] text-neutral-500 px-2 py-1 rounded-lg border border-neutral-200">
-        Scroll to zoom · drag to pan
       </div>
     </div>
   );
@@ -172,7 +172,7 @@ function MapControlButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-neutral-100 disabled:opacity-30 disabled:cursor-not-allowed text-neutral-700 transition"
+      className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-600 transition-colors"
     >
       {children}
     </button>
