@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isGoogleMapsConfigured } from "@/server/config/env";
+import { isGoogleMapsConfigured, buildShareUrl } from "@/server/config/env";
 import { saveHeatmapReport } from "@/server/repositories/heatmap-reports.repository";
 import { scanHeatmap } from "@/server/services/heatmap.service";
 import type { PublicHeatmapLeadSnapshot, PublicHeatmapReport } from "@/lib/types/heatmap";
@@ -32,7 +32,6 @@ export async function POST(request: Request) {
         typeof body.hasWebsite === "boolean" ? body.hasWebsite : undefined,
     });
 
-    const origin = new URL(request.url).origin;
     let shareToken = "";
     let shareUrl = "";
 
@@ -52,7 +51,7 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
       };
       shareToken = saveHeatmapReport(report);
-      shareUrl = `${origin}/report/${shareToken}`;
+      shareUrl = buildShareUrl(request, `/report/${shareToken}`);
     }
 
     return NextResponse.json({ ...result, shareToken, shareUrl });

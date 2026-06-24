@@ -22,3 +22,18 @@ export function getMaxResultsPerCategory(): number {
   if (Number.isNaN(parsed)) return 60;
   return Math.min(Math.max(parsed, 1), 60);
 }
+
+/** Public site URL for client-facing share links (heatmap, site audit). */
+export function getPublicAppOrigin(request: Request): string {
+  const configured = process.env.PUBLIC_APP_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+  return new URL(request.url).origin;
+}
+
+export function buildShareUrl(request: Request, path: string): string {
+  const base = getPublicAppOrigin(request);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${normalizedPath}`;
+}

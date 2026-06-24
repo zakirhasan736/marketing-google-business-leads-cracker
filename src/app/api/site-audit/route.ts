@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isGoogleMapsConfigured } from "@/server/config/env";
+import { isGoogleMapsConfigured, buildShareUrl } from "@/server/config/env";
 import { saveSiteAuditReport } from "@/server/repositories/site-audit-reports.repository";
 import { runSiteAudit } from "@/server/services/site-audit.service";
 import type {
@@ -37,7 +37,6 @@ export async function POST(request: Request) {
       businessName: snapshot?.name,
     });
 
-    const origin = new URL(request.url).origin;
     let shareToken = "";
     let shareUrl = "";
 
@@ -56,7 +55,7 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
       };
       shareToken = saveSiteAuditReport(report);
-      shareUrl = `${origin}/audit/${shareToken}`;
+      shareUrl = buildShareUrl(request, `/audit/${shareToken}`);
     }
 
     return NextResponse.json({ ...result, shareToken, shareUrl });
