@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isGoogleMapsConfigured, buildShareUrl } from "@/server/config/env";
 import { saveHeatmapReport } from "@/server/repositories/heatmap-reports.repository";
+import { updateLead } from "@/server/repositories/leads.repository";
 import { scanHeatmap } from "@/server/services/heatmap.service";
 import type { PublicHeatmapLeadSnapshot, PublicHeatmapReport } from "@/lib/types/heatmap";
 
@@ -52,6 +53,10 @@ export async function POST(request: Request) {
       };
       shareToken = saveHeatmapReport(report);
       shareUrl = buildShareUrl(request, `/report/${shareToken}`);
+      updateLead(placeId, {
+        heatmapShareUrl: shareUrl,
+        heatmapKeyword: String(keyword),
+      });
     }
 
     return NextResponse.json({ ...result, shareToken, shareUrl });

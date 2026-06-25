@@ -12,6 +12,9 @@ export const LEADS_TABLE_SCHEMA = `
     search_location TEXT,
     contact_page_url TEXT,
     maps_url TEXT,
+    heatmap_share_url TEXT,
+    heatmap_keyword TEXT,
+    site_audit_share_url TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )

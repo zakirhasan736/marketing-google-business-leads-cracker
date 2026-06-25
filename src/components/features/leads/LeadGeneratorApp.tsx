@@ -23,7 +23,7 @@ import {
 import { categories } from "@/lib/constants/geo-data";
 import { EMAIL_SCAN_BATCH_SIZE } from "@/lib/constants/lead-status";
 import { ALL_CATEGORIES_LABEL, type Lead, type LeadStatus, type RecentSearch } from "@/lib/types";
-import { downloadCsv, leadsMissingEmail, leadsToCsv } from "@/lib/utils/export-leads";
+import { downloadCsv, leadsNeedingEmailScan, leadsToRescanEmail, mergeLeadUpdates, leadsToCsv } from "@/lib/utils/export-leads";
 
 type View = "search" | "messages";
 
@@ -153,6 +153,18 @@ export function LeadGeneratorApp() {
     }
   };
 
+  const handleLeadUpdated = (placeId: string, updates: Partial<Lead>) => {
+    setLeads((prev) =>
+      prev.map((l) => (l.placeId === placeId ? { ...l, ...updates } : l))
+    );
+    setActiveModalLead((current) =>
+      current?.placeId === placeId ? { ...current, ...updates } : current
+    );
+    setActiveAuditLead((current) =>
+      current?.placeId === placeId ? { ...current, ...updates } : current
+    );
+  };
+
   const updateEmail = async (placeId: string, email: string) => {
     setLeads((prev) =>
       prev.map((l) =>
@@ -255,10 +267,20 @@ export function LeadGeneratorApp() {
     setBatchLabel("Stopping email scan after current batch...");
   };
 
-  const handleFindMissingEmails = async () => {
-    const toScan = leadsMissingEmail(leads);
+  const handleFindMissingEmails = async (rescanNoEmail = false) => {
+    const toScan = rescanNoEmail
+      ? leadsToRescanEmail(leads)
+      : leadsNeedingEmailScan(leads);
+
     if (toScan.length === 0) {
-      showSnackbar("No leads missing email.");
+      const alreadyNoEmail = leads.filter((l) => l.status === "No Email").length;
+      showSnackbar(
+        rescanNoEmail
+          ? "No No Email leads with a website to rescan."
+          : alreadyNoEmail > 0
+            ? `Nothing new to scan. ${alreadyNoEmail.toLocaleString()} lead(s) already marked No Email — use Rescan if needed.`
+            : "No leads missing email."
+      );
       return;
     }
 
@@ -268,6 +290,9 @@ export function LeadGeneratorApp() {
     let totalFound = 0;
     let totalContactForms = 0;
     let totalNoEmail = 0;
+    let totalProcessed = 0;
+    let failedBatches = 0;
+    const MAX_FAILED_BATCHES = 10;
 
     try {
       for (let i = 0; i < toScan.length; i += EMAIL_SCAN_BATCH_SIZE) {
@@ -275,29 +300,66 @@ export function LeadGeneratorApp() {
 
         const batch = toScan.slice(i, i + EMAIL_SCAN_BATCH_SIZE);
         const batchEnd = Math.min(i + EMAIL_SCAN_BATCH_SIZE, toScan.length);
-        setBatchLabel(`Finding emails ${i + 1}–${batchEnd} of ${toScan.length}`);
+        setBatchLabel(
+          `${rescanNoEmail ? "Rescanning" : "Finding emails"} ${batchEnd.toLocaleString()} / ${toScan.length.toLocaleString()} · ${totalFound} found`
+        );
 
-        const result = await findMissingEmails(batch);
-        setLeads(result.leads);
-        totalFound += result.emailsFound;
-        totalContactForms += result.contactFormsFound;
-        totalNoEmail += result.markedNoEmail;
+        try {
+          const result = await findMissingEmails(batch);
+          setLeads((prev) => mergeLeadUpdates(prev, result.updatedLeads));
+          totalFound += result.emailsFound;
+          totalContactForms += result.contactFormsFound;
+          totalNoEmail += result.markedNoEmail;
+          totalProcessed += result.processed;
+          failedBatches = 0;
+
+          if (batchEnd % 25 === 0) {
+            try {
+              setLeads(await fetchLeads());
+            } catch {
+              // keep merged state
+            }
+          }
+        } catch (batchError) {
+          failedBatches++;
+          console.error(batchError);
+          try {
+            setLeads(await fetchLeads());
+          } catch {
+            // keep current list
+          }
+          if (failedBatches >= MAX_FAILED_BATCHES) {
+            throw batchError;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
       }
 
       if (stopEmailScanRef.current) {
         showSnackbar(
-          `Email scan stopped. ${totalFound} collected, ${totalNoEmail} marked No Email.`
+          `Email scan stopped. ${totalFound} collected, ${totalProcessed.toLocaleString()} processed.`
         );
       } else {
         showSnackbar(
           totalContactForms > 0
-            ? `Done. ${totalFound} email(s) → Collected. ${totalContactForms} contact form(s). ${totalNoEmail} marked No Email.`
-            : `Done. ${totalFound} email(s) → Collected. ${totalNoEmail} marked No Email.`
+            ? `Done. ${totalFound} email(s) found, ${totalProcessed.toLocaleString()} processed. ${totalContactForms} contact form(s).`
+            : `Done. ${totalFound} email(s) found, ${totalProcessed.toLocaleString()} processed.`
         );
       }
     } catch (error) {
       console.error(error);
-      showSnackbar("Email search failed.");
+      try {
+        setLeads(await fetchLeads());
+      } catch {
+        // keep current list if refresh fails
+      }
+      const message =
+        error instanceof Error ? error.message : "Email search failed.";
+      showSnackbar(
+        totalProcessed > 0
+          ? `Scan paused after ${totalProcessed.toLocaleString()} lead(s). ${message} Click again to continue remaining leads.`
+          : message
+      );
     } finally {
       setLoading(false);
       setBatchLabel(null);
@@ -569,7 +631,8 @@ export function LeadGeneratorApp() {
                 onDeleteSelected={deleteSelected}
                 onDeleteAll={deleteAllFromDatabase}
                 onDeleteSingle={deleteSingle}
-                onFindMissingEmails={handleFindMissingEmails}
+                onFindMissingEmails={() => handleFindMissingEmails(false)}
+                onRescanNoEmail={() => handleFindMissingEmails(true)}
                 onStopEmailScan={handleStopEmailScan}
                 onExportLeads={handleExportLeads}
                 onLeadClick={setActiveModalLead}
@@ -597,10 +660,12 @@ export function LeadGeneratorApp() {
       <LeadModal
         lead={activeModalLead}
         onClose={() => setActiveModalLead(null)}
+        onLeadUpdated={handleLeadUpdated}
       />
       <SiteAuditModal
         lead={activeAuditLead}
         onClose={() => setActiveAuditLead(null)}
+        onLeadUpdated={handleLeadUpdated}
       />
     </div>
   );

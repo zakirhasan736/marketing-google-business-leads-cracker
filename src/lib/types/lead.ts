@@ -16,6 +16,9 @@ export interface Lead {
   searchLocation?: string | null;
   contactPageUrl?: string | null;
   mapsUrl?: string | null;
+  heatmapShareUrl?: string | null;
+  heatmapKeyword?: string | null;
+  siteAuditShareUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }

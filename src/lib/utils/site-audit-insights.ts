@@ -4,6 +4,7 @@ import type {
   KeywordReport,
   LocalSearchRank,
   SiteAuditInsights,
+  TechnicalSeoReport,
 } from "@/lib/types/site-audit";
 
 export function buildSiteAuditInsights(params: {
@@ -13,9 +14,19 @@ export function buildSiteAuditInsights(params: {
   htmlMeta: HtmlMetaReport;
   keywords: KeywordReport;
   localRank: LocalSearchRank | null;
+  htmlAnalysisWarning?: string | null;
+  technicalSeo?: TechnicalSeoReport | null;
 }): SiteAuditInsights {
-  const { businessName, url, scores, htmlMeta, keywords, localRank } = params;
-
+  const {
+    businessName,
+    url,
+    scores,
+    htmlMeta,
+    keywords,
+    localRank,
+    htmlAnalysisWarning,
+    technicalSeo,
+  } = params;
   const overallScore = Math.round(
     scores.performance * 0.3 +
       scores.accessibility * 0.2 +
@@ -56,6 +67,9 @@ export function buildSiteAuditInsights(params: {
   if (scores.seo < 80) {
     issues.push(`SEO score is ${scores.seo}/100 — Google may rank competitors higher`);
   }
+  if (htmlAnalysisWarning) {
+    issues.push(`Live page crawl failed — ${htmlAnalysisWarning}`);
+  }
   if (!htmlMeta.title) issues.push("Missing page title — essential for Google rankings");
   if (!htmlMeta.description) issues.push("Missing meta description — hurts click-through rate in search");
   if (htmlMeta.h1.length === 0) issues.push("No H1 heading found — weak on-page SEO structure");
@@ -69,9 +83,22 @@ export function buildSiteAuditInsights(params: {
   if (keywords.missingOpportunities.length > 0) {
     issues.push(`Missing keyword opportunities: ${keywords.missingOpportunities.slice(0, 3).join(", ")}`);
   }
+  if (technicalSeo) {
+    if (!technicalSeo.ssl.secure) issues.push(technicalSeo.ssl.note);
+    if (!technicalSeo.sitemap.found) issues.push("No XML sitemap found for Google");
+    if (technicalSeo.rendering.mode === "csr") {
+      issues.push(`CSR detected — ${technicalSeo.rendering.summary}`);
+    }
+    if (technicalSeo.robotsTxt.allowsGooglebot === false) {
+      issues.push("robots.txt blocks Google from crawling the site");
+    }
+    const thinPages = technicalSeo.crawledPages.filter((p) => p.issue);
+    if (thinPages.length >= 2) {
+      issues.push(`${thinPages.length} internal pages have SEO issues (thin content, missing H1, or errors)`);
+    }
+  }
 
   const recommendations: string[] = [];
-
   if (scores.performance < 85) {
     recommendations.push("Compress images, enable caching, and reduce JavaScript for faster load times");
   }
@@ -88,9 +115,17 @@ export function buildSiteAuditInsights(params: {
   if (localRank && localRank.rank > 3) {
     recommendations.push("Combine website fixes with Google Business Profile + local SEO");
   }
+  if (technicalSeo?.rendering.mode === "csr") {
+    recommendations.push("Add server-side rendering or static HTML for key landing pages");
+  }
+  if (technicalSeo && !technicalSeo.sitemap.found) {
+    recommendations.push("Publish sitemap.xml and submit it in Google Search Console");
+  }
+  if (technicalSeo && !technicalSeo.ssl.secure) {
+    recommendations.push("Enable HTTPS across the entire site with a valid SSL certificate");
+  }
 
-  const rankLine = localRank
-    ? `\n• Google search position: #${localRank.rankLabel} for "${localRank.keyword}"`
+  const rankLine = localRank    ? `\n• Google search position: #${localRank.rankLabel} for "${localRank.keyword}"`
     : "";
 
   const pitch = `Hi ${businessName},

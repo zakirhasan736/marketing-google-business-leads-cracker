@@ -88,31 +88,65 @@ export async function deleteLeadApi(placeId: string): Promise<void> {
 }
 
 export async function findMissingEmails(
-  leads: Lead[]
+  leads: Lead[],
+  options?: { retries?: number }
 ): Promise<{
-  leads: Lead[];
+  updatedLeads: Lead[];
   emailsFound: number;
   contactFormsFound: number;
   markedNoEmail: number;
   processed: number;
   skipped: number;
 }> {
-  const response = await fetch("/api/leads/find-emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ leads }),
-  });
+  const retries = options?.retries ?? 2;
+  let lastError: Error | null = null;
+  const placeIds = leads.map((lead) => lead.placeId);
 
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Email search failed");
-  return {
-    leads: data.leads,
-    emailsFound: data.emailsFound ?? 0,
-    contactFormsFound: data.contactFormsFound ?? 0,
-    markedNoEmail: data.markedNoEmail ?? 0,
-    processed: data.processed ?? 0,
-    skipped: data.skipped ?? 0,
-  };
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch("/api/leads/find-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ placeIds }),
+      });
+
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        const status = response.status;
+        throw new Error(
+          status === 504
+            ? "Email scan timed out on the server. Retrying…"
+            : `Email scan failed (${status}). Server did not return JSON.`
+        );
+      }
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Email search failed");
+      }
+
+      return {
+        updatedLeads: data.updatedLeads ?? data.leads ?? [],
+        emailsFound: data.emailsFound ?? 0,
+        contactFormsFound: data.contactFormsFound ?? 0,
+        markedNoEmail: data.markedNoEmail ?? 0,
+        processed: data.processed ?? 0,
+        skipped: data.skipped ?? 0,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Email search failed");
+      const isRetryable =
+        attempt < retries &&
+        (lastError.message.includes("timed out") ||
+          lastError.message.includes("504") ||
+          lastError.message.includes("Failed to fetch"));
+
+      if (!isRetryable) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+    }
+  }
+
+  throw lastError ?? new Error("Email search failed");
 }
 
 export async function exportLeadsApi(placeIds: string[]): Promise<{

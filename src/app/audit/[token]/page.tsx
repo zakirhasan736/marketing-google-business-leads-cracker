@@ -69,6 +69,10 @@ export default function SharedSiteAuditPage({
         <SiteAuditReportView
           lead={report.lead}
           result={report.result}
+          strategy={report.result.strategy === "desktop" ? "desktop" : "mobile"}
+          deviceAvailable={{
+            [report.result.strategy === "desktop" ? "desktop" : "mobile"]: true,
+          }}
           readOnly
         />
       </div>

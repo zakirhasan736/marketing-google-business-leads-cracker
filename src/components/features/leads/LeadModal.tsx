@@ -1,37 +1,72 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";import { HeatmapReportView } from "@/components/features/leads/HeatmapReportView";
-import { scanHeatmapApi } from "@/lib/api/heatmap.client";
+import { motion, AnimatePresence } from "motion/react";
+import { HeatmapReportView } from "@/components/features/leads/HeatmapReportView";
+import { fetchSharedReport, scanHeatmapApi } from "@/lib/api/heatmap.client";
 import type { Lead } from "@/lib/types";
 import type { HeatmapScanResult } from "@/lib/types/heatmap";
+import { extractHeatmapShareToken } from "@/lib/utils/heatmap-share";
 
 interface LeadModalProps {
   lead: Lead | null;
   onClose: () => void;
+  onLeadUpdated?: (placeId: string, updates: Partial<Lead>) => void;
 }
 
 function defaultKeyword(lead: Lead): string {
+  if (lead.heatmapKeyword) return lead.heatmapKeyword;
   if (lead.searchCategory) {
     return `${lead.searchCategory} near me`;
   }
   return "local business near me";
 }
 
-export function LeadModal({ lead, onClose }: LeadModalProps) {
+export function LeadModal({ lead, onClose, onLeadUpdated }: LeadModalProps) {
   const [keyword, setKeyword] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [loadingSaved, setLoadingSaved] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [result, setResult] = useState<HeatmapScanResult | null>(null);
   const [shareUrl, setShareUrl] = useState("");
 
   useEffect(() => {
     if (!lead) return;
-    setKeyword(defaultKeyword(lead));
+
+    let cancelled = false;
+    const initialKeyword = defaultKeyword(lead);
+
+    setKeyword(initialKeyword);
     setScanError(null);
     setResult(null);
-    setShareUrl("");
+    setShareUrl(lead.heatmapShareUrl ?? "");
+
+    if (!lead.heatmapShareUrl) return;
+
+    const token = extractHeatmapShareToken(lead.heatmapShareUrl);
+    if (!token) return;
+
+    setLoadingSaved(true);
+    fetchSharedReport(token)
+      .then((report) => {
+        if (cancelled) return;
+        setResult(report.result);
+        if (report.result?.keyword) {
+          setKeyword(report.result.keyword);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setScanError("Saved heatmap link could not be loaded. Run a new scan.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSaved(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [lead]);
 
   const handleScan = async () => {
@@ -47,7 +82,12 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
         lead,
       });
       setResult(scanResult);
-      setShareUrl(scanResult.shareUrl ?? "");
+      const nextShareUrl = scanResult.shareUrl ?? "";
+      setShareUrl(nextShareUrl);
+      onLeadUpdated?.(lead.placeId, {
+        heatmapShareUrl: nextShareUrl || null,
+        heatmapKeyword: keyword.trim(),
+      });
     } catch (error) {
       setScanError(
         error instanceof Error ? error.message : "Heatmap scan failed"
@@ -90,7 +130,7 @@ export function LeadModal({ lead, onClose }: LeadModalProps) {
           <HeatmapReportView
             lead={snapshot}
             result={result}
-            scanning={scanning}
+            scanning={scanning || loadingSaved}
             keyword={keyword}
             onKeywordChange={setKeyword}
             onScan={handleScan}

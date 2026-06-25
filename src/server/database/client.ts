@@ -19,6 +19,15 @@ function migrateDatabase(database: Database.Database): void {
   if (!columnNames.has("maps_url")) {
     database.exec("ALTER TABLE leads ADD COLUMN maps_url TEXT");
   }
+  if (!columnNames.has("heatmap_share_url")) {
+    database.exec("ALTER TABLE leads ADD COLUMN heatmap_share_url TEXT");
+  }
+  if (!columnNames.has("heatmap_keyword")) {
+    database.exec("ALTER TABLE leads ADD COLUMN heatmap_keyword TEXT");
+  }
+  if (!columnNames.has("site_audit_share_url")) {
+    database.exec("ALTER TABLE leads ADD COLUMN site_audit_share_url TEXT");
+  }
 }
 
 export function getDatabase(): Database.Database {

@@ -14,6 +14,9 @@ interface LeadRow {
   search_location: string | null;
   contact_page_url: string | null;
   maps_url: string | null;
+  heatmap_share_url: string | null;
+  heatmap_keyword: string | null;
+  site_audit_share_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +35,9 @@ function rowToLead(row: LeadRow): Lead {
     searchLocation: row.search_location,
     contactPageUrl: row.contact_page_url,
     mapsUrl: row.maps_url,
+    heatmapShareUrl: row.heatmap_share_url,
+    heatmapKeyword: row.heatmap_keyword,
+    siteAuditShareUrl: row.site_audit_share_url,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -119,7 +125,18 @@ export function upsertLead(
 
 export function updateLead(
   placeId: string,
-  updates: Partial<Pick<Lead, "status" | "note" | "email" | "contactPageUrl">>
+  updates: Partial<
+    Pick<
+      Lead,
+      | "status"
+      | "note"
+      | "email"
+      | "contactPageUrl"
+      | "heatmapShareUrl"
+      | "heatmapKeyword"
+      | "siteAuditShareUrl"
+    >
+  >
 ): Lead | null {
   const existing = getLeadByPlaceId(placeId);
   if (!existing) return null;
@@ -132,6 +149,9 @@ export function updateLead(
         note = COALESCE(?, note),
         email = COALESCE(?, email),
         contact_page_url = COALESCE(?, contact_page_url),
+        heatmap_share_url = COALESCE(?, heatmap_share_url),
+        heatmap_keyword = COALESCE(?, heatmap_keyword),
+        site_audit_share_url = COALESCE(?, site_audit_share_url),
         updated_at = ?
       WHERE place_id = ?`
     )
@@ -140,6 +160,9 @@ export function updateLead(
       updates.note ?? null,
       updates.email ?? null,
       updates.contactPageUrl ?? null,
+      updates.heatmapShareUrl ?? null,
+      updates.heatmapKeyword ?? null,
+      updates.siteAuditShareUrl ?? null,
       now,
       placeId
     );

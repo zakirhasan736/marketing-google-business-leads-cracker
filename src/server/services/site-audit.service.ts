@@ -2,6 +2,8 @@ import * as cheerio from "cheerio";
 import { getGoogleMapsApiKey } from "@/server/config/env";
 import { getLocalSearchRank } from "@/server/services/heatmap.service";
 import { buildSiteAuditInsights } from "@/lib/utils/site-audit-insights";
+import { buildAuditDashboard } from "@/lib/utils/build-audit-dashboard";
+import { runTechnicalSeoAudit } from "@/server/services/site-audit-technical.service";
 import type {
   AuditFinding,
   AuditMetric,
@@ -10,8 +12,6 @@ import type {
   KeywordReport,
   SiteAuditResult,
 } from "@/lib/types/site-audit";
-
-const NOT_RANKED = 21;
 
 interface PageSpeedResponse {
   lighthouseResult?: {
@@ -129,11 +129,18 @@ function parseFindings(data: PageSpeedResponse): AuditFinding[] {
     if (!audit?.title || audit.score == null || audit.score >= 0.9) continue;
     if (audit.scoreDisplayMode === "notApplicable") continue;
 
-    const category = audit.id?.includes("accessibility")
-      ? "accessibility"
-      : audit.id?.includes("seo") || audit.id?.startsWith("meta-")
-        ? "seo"
-        : "performance";
+    const category =
+      audit.id?.includes("accessibility") || audit.title?.toLowerCase().includes("accessib")
+        ? "accessibility"
+        : audit.id?.includes("seo") ||
+            audit.id?.startsWith("meta-") ||
+            audit.title?.toLowerCase().includes("seo")
+          ? "seo"
+          : audit.id?.includes("best-practices") ||
+              audit.id?.includes("is-on-https") ||
+              audit.id?.includes("uses-http")
+            ? "best-practices"
+            : "performance";
 
     findings.push({
       id: audit.id ?? audit.title,
@@ -149,26 +156,90 @@ function parseFindings(data: PageSpeedResponse): AuditFinding[] {
   return findings;
 }
 
-async function analyzeHtml(url: string): Promise<{
-  htmlMeta: HtmlMetaReport;
-  keywords: KeywordReport;
-  extraFindings: AuditFinding[];
-}> {
+const HTML_FETCH_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
+function buildUrlCandidates(rawUrl: string): string[] {
+  const normalized = normalizeUrl(rawUrl);
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  const add = (value: string) => {
+    if (!seen.has(value)) {
+      seen.add(value);
+      candidates.push(value);
+    }
+  };
+
+  add(normalized);
+
+  try {
+    const parsed = new URL(normalized);
+    const bareHost = parsed.hostname.replace(/^www\./i, "");
+    const path = `${parsed.pathname}${parsed.search}`;
+
+    if (!/^www\./i.test(parsed.hostname)) {
+      add(`${parsed.protocol}//www.${bareHost}${path}`);
+    } else {
+      add(`${parsed.protocol}//${bareHost}${path}`);
+    }
+
+    if (path === "/" || path === "") {
+      add(`${parsed.protocol}//${parsed.hostname}/`);
+    } else if (!parsed.pathname.endsWith("/")) {
+      add(`${parsed.protocol}//${parsed.hostname}${parsed.pathname}/${parsed.search}`);
+    }
+
+    if (parsed.protocol === "https:") {
+      add(normalized.replace(/^https:/i, "http:"));
+    } else if (parsed.protocol === "http:") {
+      add(normalized.replace(/^http:/i, "https:"));
+    }
+  } catch {
+    // keep normalized only
+  }
+
+  return candidates;
+}
+
+async function fetchHtmlPage(
+  url: string
+): Promise<{ html: string; finalUrl: string; status: number } | null> {
   const response = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (compatible; SiteAuditBot/1.0; +https://leadgen.local)",
-      Accept: "text/html",
-    },
+    headers: HTML_FETCH_HEADERS,
     signal: AbortSignal.timeout(20000),
     redirect: "follow",
   });
 
   if (!response.ok) {
-    throw new Error(`Could not fetch website (${response.status})`);
+    return { html: "", finalUrl: url, status: response.status };
   }
 
-  const html = await response.text();
+  const contentType = response.headers.get("content-type") ?? "";
+  if (
+    !contentType.includes("text/html") &&
+    !contentType.includes("text/plain") &&
+    !contentType.includes("application/xhtml")
+  ) {
+    return null;
+  }
+
+  return {
+    html: await response.text(),
+    finalUrl: response.url || url,
+    status: response.status,
+  };
+}
+
+function parseHtmlDocument(html: string): {
+  htmlMeta: HtmlMetaReport;
+  keywords: KeywordReport;
+  extraFindings: AuditFinding[];
+} {
   const $ = cheerio.load(html);
 
   $("script, style, noscript").remove();
@@ -227,7 +298,6 @@ async function analyzeHtml(url: string): Promise<{
   const fromH1 = h1.flatMap(extractKeywords);
   const fromBody = extractKeywords(bodyText).slice(0, 15);
 
-  const allKw = new Set([...fromTitle, ...fromH1]);
   const missingOpportunities: string[] = [];
   if (!description) missingOpportunities.push("meta description keywords");
   if (h1.length === 0) missingOpportunities.push("primary H1 keyword");
@@ -265,20 +335,56 @@ async function analyzeHtml(url: string): Promise<{
   return { htmlMeta, keywords, extraFindings };
 }
 
+async function analyzeHtml(url: string): Promise<{
+  htmlMeta: HtmlMetaReport;
+  keywords: KeywordReport;
+  extraFindings: AuditFinding[];
+  fetchedUrl: string;
+  rawHtml: string;
+}> {
+  const candidates = buildUrlCandidates(url);
+  let lastStatus = 0;
+
+  for (const candidate of candidates) {
+    try {
+      const fetched = await fetchHtmlPage(candidate);
+      if (!fetched) continue;
+      if (!fetched.html) {
+        lastStatus = fetched.status;
+        continue;
+      }
+      const parsed = parseHtmlDocument(fetched.html);
+      return { ...parsed, fetchedUrl: fetched.finalUrl, rawHtml: fetched.html };
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(
+    lastStatus > 0
+      ? `Could not fetch website (${lastStatus}) — page may be down, blocked, or URL incorrect`
+      : "Could not fetch website — page may block automated requests"
+  );
+}
+
 export async function runSiteAudit(params: {
   url: string;
   placeId?: string;
   keyword?: string;
   businessName?: string;
   strategy?: "mobile" | "desktop";
+  headlessRender?: boolean;
 }): Promise<SiteAuditResult> {
   const url = normalizeUrl(params.url);
   const strategy = params.strategy ?? "mobile";
 
+  let htmlAnalysisWarning: string | null = null;
+
   const [pageSpeed, htmlAnalysis] = await Promise.all([
     runPageSpeed(url, strategy),
     analyzeHtml(url).catch((err) => {
-      console.warn("HTML analysis failed:", err);
+      htmlAnalysisWarning =
+        err instanceof Error ? err.message : "HTML analysis failed";
       return null;
     }),
   ]);
@@ -293,6 +399,16 @@ export async function runSiteAudit(params: {
     ...parseFindings(pageSpeed),
     ...(htmlAnalysis?.extraFindings ?? []),
   ];
+
+  if (htmlAnalysisWarning) {
+    findings.unshift({
+      id: "html-fetch-failed",
+      title: "Live HTML crawl unavailable",
+      description: htmlAnalysisWarning,
+      category: "html",
+      severity: "warning",
+    });
+  }
 
   const htmlMeta = htmlAnalysis?.htmlMeta ?? {
     title: null,
@@ -309,7 +425,9 @@ export async function runSiteAudit(params: {
     wordCount: 0,
     textToHtmlRatio: 0,
     ssrLikely: false,
-    ssrNote: "Could not analyze HTML content",
+    ssrNote:
+      htmlAnalysisWarning ??
+      "Could not analyze HTML content — Lighthouse scores may still apply",
   };
 
   const keywords = htmlAnalysis?.keywords ?? {
@@ -329,6 +447,30 @@ export async function runSiteAudit(params: {
     }
   }
 
+  let technicalSeo = null;
+  const technicalFindings: AuditFinding[] = [];
+  const auditBaseUrl = htmlAnalysis?.fetchedUrl ?? url;
+
+  try {
+    const technical = await runTechnicalSeoAudit({
+      siteUrl: auditBaseUrl,
+      homepageHtml: htmlAnalysis?.rawHtml ?? null,
+      headlessRender: params.headlessRender,
+      strategy,
+    });
+    technicalSeo = technical.report;
+    technicalFindings.push(...technical.findings);
+
+    htmlMeta.ssrLikely =
+      technical.report.rendering.mode === "ssr" ||
+      technical.report.rendering.mode === "hybrid";
+    htmlMeta.ssrNote = technical.report.rendering.summary;
+  } catch (err) {
+    console.warn("Technical SEO audit failed:", err);
+  }
+
+  const allFindings = [...findings, ...technicalFindings];
+
   const insights = buildSiteAuditInsights({
     businessName: params.businessName ?? "Business",
     url,
@@ -336,6 +478,15 @@ export async function runSiteAudit(params: {
     htmlMeta,
     keywords,
     localRank,
+    htmlAnalysisWarning,
+    technicalSeo,
+  });
+
+  const dashboard = buildAuditDashboard({
+    scores,
+    insights,
+    htmlMeta,
+    technicalSeo,
   });
 
   return {
@@ -344,10 +495,14 @@ export async function runSiteAudit(params: {
     strategy,
     scores,
     metrics,
-    findings,
+    findings: allFindings,
     htmlMeta,
     keywords,
     localRank,
     insights,
+    technicalSeo,
+    dashboard,
+    htmlFetchedUrl: htmlAnalysis?.fetchedUrl ?? null,
+    htmlAnalysisWarning,
   };
 }

@@ -1,26 +1,29 @@
 import * as cheerio from "cheerio";
 import { extractEmailsFromHtml } from "@/server/services/email-extractors";
 
+const FETCH_TIMEOUT_MS = 5000;
+
 const FETCH_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (compatible; LeadGenBot/1.0; +https://localhost)",
   Accept: "text/html,application/xhtml+xml",
 };
 
-const COMMON_PATHS = [
+const PRIORITY_PATHS = [
   "/contact",
   "/contact-us",
   "/contact-us/",
-  "/get-in-touch",
-  "/reach-us",
   "/about",
   "/about-us",
+  "/get-in-touch",
+];
+
+const SECONDARY_PATHS = [
+  "/reach-us",
   "/team",
   "/contacts",
   "/support",
   "/connect",
-  "/inquiries",
-  "/enquiries",
 ];
 
 const CONTACT_LINK_KEYWORDS = [
@@ -34,6 +37,8 @@ const CONTACT_LINK_KEYWORDS = [
   "enquir",
 ];
 
+const PARALLEL_FETCH_CHUNK = 4;
+
 export interface EmailDiscoveryResult {
   email: string | null;
   contactFormDetected: boolean;
@@ -43,7 +48,7 @@ export interface EmailDiscoveryResult {
 async function fetchPageHtml(pageUrl: string): Promise<string | null> {
   try {
     const response = await fetch(pageUrl, {
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: FETCH_HEADERS,
       redirect: "follow",
     });
@@ -74,11 +79,60 @@ async function extractFromPage(
   return extractEmailsFromHtml(html, getHostname(pageUrl));
 }
 
+function resolvePageUrls(baseUrl: string, paths: string[]): string[] {
+  const urls: string[] = [];
+  for (const pagePath of paths) {
+    try {
+      urls.push(new URL(pagePath, baseUrl).toString());
+    } catch {
+      // ignore invalid URL
+    }
+  }
+  return urls;
+}
+
+async function scanPagesInParallel(
+  pageUrls: string[]
+): Promise<{ email: string | null; hasContactForm: boolean; pageUrl: string | null }> {
+  let contactFormDetected = false;
+  let contactPageUrl: string | null = null;
+
+  for (let i = 0; i < pageUrls.length; i += PARALLEL_FETCH_CHUNK) {
+    const chunk = pageUrls.slice(i, i + PARALLEL_FETCH_CHUNK);
+    const results = await Promise.all(
+      chunk.map(async (pageUrl) => ({
+        pageUrl,
+        ...(await extractFromPage(pageUrl)),
+      }))
+    );
+
+    for (const result of results) {
+      if (result.email) {
+        return {
+          email: result.email,
+          hasContactForm: result.hasContactForm,
+          pageUrl: result.pageUrl,
+        };
+      }
+      if (result.hasContactForm) {
+        contactFormDetected = true;
+        contactPageUrl = result.pageUrl;
+      }
+    }
+  }
+
+  return {
+    email: null,
+    hasContactForm: contactFormDetected,
+    pageUrl: contactPageUrl,
+  };
+}
+
 async function crawlContactPages(
   targetUrl: string,
   visited: Set<string>
 ): Promise<{ email: string | null; hasContactForm: boolean; pageUrl: string | null }> {
-  if (visited.size > 8) {
+  if (visited.size > 4) {
     return { email: null, hasContactForm: false, pageUrl: null };
   }
   visited.add(targetUrl);
@@ -118,7 +172,7 @@ async function crawlContactPages(
     let foundContactForm = direct.hasContactForm;
     let contactPageUrl: string | null = foundContactForm ? targetUrl : null;
 
-    for (const link of potentialLinks.slice(0, 6)) {
+    for (const link of potentialLinks.slice(0, 3)) {
       const result = await extractFromPage(link);
       if (result.email) {
         return { email: result.email, hasContactForm: result.hasContactForm, pageUrl: link };
@@ -153,43 +207,26 @@ export async function discoverEmailFromWebsite(
     return { email: null, contactFormDetected: false, contactPageUrl: null };
   }
 
-  let contactFormDetected = false;
-  let contactPageUrl: string | null = null;
-
-  const homepage = await extractFromPage(url);
-  if (homepage.email) {
+  const priorityUrls = [url, ...resolvePageUrls(url, PRIORITY_PATHS)];
+  const priority = await scanPagesInParallel(priorityUrls);
+  if (priority.email) {
     return {
-      email: homepage.email,
-      contactFormDetected: homepage.hasContactForm,
-      contactPageUrl: homepage.hasContactForm ? url : null,
+      email: priority.email,
+      contactFormDetected: priority.hasContactForm,
+      contactPageUrl: priority.pageUrl,
     };
   }
-  if (homepage.hasContactForm) {
-    contactFormDetected = true;
-    contactPageUrl = url;
+
+  const secondary = await scanPagesInParallel(resolvePageUrls(url, SECONDARY_PATHS));
+  if (secondary.email) {
+    return {
+      email: secondary.email,
+      contactFormDetected: secondary.hasContactForm,
+      contactPageUrl: secondary.pageUrl,
+    };
   }
 
-  for (const pagePath of COMMON_PATHS) {
-    try {
-      const fullUrl = new URL(pagePath, url).toString();
-      const result = await extractFromPage(fullUrl);
-      if (result.email) {
-        return {
-          email: result.email,
-          contactFormDetected: result.hasContactForm,
-          contactPageUrl: fullUrl,
-        };
-      }
-      if (result.hasContactForm) {
-        contactFormDetected = true;
-        contactPageUrl = fullUrl;
-      }
-    } catch {
-      // ignore invalid URL
-    }
-  }
-
-  const crawled = await crawlContactPages(url, new Set([url]));
+  const crawled = await crawlContactPages(url, new Set([url, ...priorityUrls]));
   if (crawled.email) {
     return {
       email: crawled.email,
@@ -198,9 +235,14 @@ export async function discoverEmailFromWebsite(
     };
   }
 
+  const contactFormDetected =
+    priority.hasContactForm || secondary.hasContactForm || crawled.hasContactForm;
+  const contactPageUrl =
+    priority.pageUrl ?? secondary.pageUrl ?? crawled.pageUrl ?? null;
+
   return {
     email: null,
-    contactFormDetected: contactFormDetected || crawled.hasContactForm,
-    contactPageUrl: contactPageUrl ?? crawled.pageUrl,
+    contactFormDetected,
+    contactPageUrl,
   };
 }

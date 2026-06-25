@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { isGoogleMapsConfigured, buildShareUrl } from "@/server/config/env";
+import { updateLead } from "@/server/repositories/leads.repository";
 import { saveSiteAuditReport } from "@/server/repositories/site-audit-reports.repository";
 import { runSiteAudit } from "@/server/services/site-audit.service";
 import type {
   PublicSiteAuditLeadSnapshot,
   PublicSiteAuditReport,
 } from "@/lib/types/site-audit";
+
+/** Site audit can run PageSpeed + multi-page technical crawl (+ optional headless render). */
+export const maxDuration = 180;
 
 export async function POST(request: Request) {
   if (!isGoogleMapsConfigured()) {
@@ -17,7 +21,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { url, placeId, keyword, lead } = body;
+    const { url, placeId, keyword, lead, strategy, headlessRender } = body;
 
     if (!url) {
       return NextResponse.json({ error: "url is required" }, { status: 400 });
@@ -35,6 +39,9 @@ export async function POST(request: Request) {
       placeId: placeId ?? snapshot?.placeId,
       keyword: searchKeyword,
       businessName: snapshot?.name,
+      strategy:
+        strategy === "desktop" || strategy === "mobile" ? strategy : undefined,
+      headlessRender: Boolean(headlessRender),
     });
 
     let shareToken = "";
@@ -56,6 +63,10 @@ export async function POST(request: Request) {
       };
       shareToken = saveSiteAuditReport(report);
       shareUrl = buildShareUrl(request, `/audit/${shareToken}`);
+      const resolvedPlaceId = snapshot.placeId ?? placeId;
+      if (resolvedPlaceId) {
+        updateLead(resolvedPlaceId, { siteAuditShareUrl: shareUrl });
+      }
     }
 
     return NextResponse.json({ ...result, shareToken, shareUrl });

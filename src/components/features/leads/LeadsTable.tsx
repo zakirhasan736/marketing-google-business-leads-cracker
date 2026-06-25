@@ -7,6 +7,8 @@ import { LeadTableFiltersBar,
   DEFAULT_LEAD_FILTERS,
 } from "@/components/features/leads/LeadTableFiltersBar";
 import { EditableEmailCell } from "@/components/features/leads/EditableEmailCell";
+import { HeatmapLinkCell } from "@/components/features/leads/HeatmapLinkCell";
+import { SiteAuditLinkCell } from "@/components/features/leads/SiteAuditLinkCell";
 import { LeadsTablePagination } from "@/components/features/leads/LeadsTablePagination";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { LEAD_STATUSES } from "@/lib/constants/lead-status";
@@ -40,6 +42,7 @@ interface LeadsTableProps {
   onDeleteAll: () => void;
   onDeleteSingle: (placeId: string) => void;
   onFindMissingEmails: () => void;
+  onRescanNoEmail?: () => void;
   onStopEmailScan?: () => void;
   onExportLeads: (leads: Lead[]) => void;
   onLeadClick: (lead: Lead) => void;
@@ -64,6 +67,7 @@ export function LeadsTable({
   onDeleteAll,
   onDeleteSingle,
   onFindMissingEmails,
+  onRescanNoEmail,
   onStopEmailScan,
   onExportLeads,
   onLeadClick,
@@ -129,7 +133,9 @@ export function LeadsTable({
   }, [leads]);
 
   const emailScanActive =
-    Boolean(batchLabel) && batchLabel!.startsWith("Finding emails");
+    Boolean(batchLabel) &&
+    (batchLabel!.startsWith("Finding emails") ||
+      batchLabel!.startsWith("Rescanning"));
 
   const handleExport = () => {
     const toExport =
@@ -208,6 +214,16 @@ export function LeadsTable({
               )}{" "}
               Find Missing Emails
             </button>
+            {onRescanNoEmail && (
+              <button
+                onClick={onRescanNoEmail}
+                disabled={loading || deleting}
+                className="text-slate-600 flex items-center gap-1 font-medium text-sm hover:underline disabled:opacity-50"
+                title="Re-scrape websites for leads already marked No Email"
+              >
+                Rescan No Email
+              </button>
+            )}
             <button
               onClick={handleExport}
               disabled={loading || deleting || filteredLeads.length === 0}
@@ -304,6 +320,12 @@ export function LeadsTable({
                 <th className="p-4 font-semibold text-neutral-600">Status</th>
                 <th className="p-4 font-semibold text-neutral-600">Website</th>
                 <th className="p-4 font-semibold text-neutral-600">Notes</th>
+                <th className="p-4 font-semibold text-neutral-600 min-w-[140px]">
+                  Heatmap Link
+                </th>
+                <th className="p-4 font-semibold text-neutral-600 min-w-[120px]">
+                  Audit Link
+                </th>
                 <th className="p-4 font-semibold text-neutral-600">Action</th>
               </tr>
             </thead>
@@ -444,12 +466,25 @@ export function LeadsTable({
                         />
                       </td>
                       <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                        <HeatmapLinkCell
+                          shareUrl={biz.heatmapShareUrl}
+                          keyword={biz.heatmapKeyword}
+                        />
+                      </td>
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                        <SiteAuditLinkCell shareUrl={biz.siteAuditShareUrl} />
+                      </td>
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => onLeadClick(biz)}
                             className="text-blue-600 hover:text-blue-800 text-sm font-semibold inline-flex items-center gap-1"
-                            title="Open SEO heatmap report"
+                            title={
+                              biz.heatmapShareUrl
+                                ? "Open saved heatmap report"
+                                : "Open SEO heatmap report"
+                            }
                           >
                             <BarChart3 size={14} />
                             Heatmap
@@ -459,7 +494,11 @@ export function LeadsTable({
                             onClick={() => onSiteAuditClick(biz)}
                             disabled={!biz.website || biz.website === "N/A"}
                             className="text-violet-600 hover:text-violet-800 disabled:text-neutral-400 text-sm font-semibold inline-flex items-center gap-1"
-                            title="Run website audit"
+                            title={
+                              biz.siteAuditShareUrl
+                                ? "Open saved site audit"
+                                : "Run website audit"
+                            }
                           >
                             <Gauge size={14} />
                             Audit
@@ -479,7 +518,7 @@ export function LeadsTable({
               </AnimatePresence>
               {filteredLeads.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="p-8 text-center text-neutral-400">
+                  <td colSpan={13} className="p-8 text-center text-neutral-400">
                     {leads.length === 0
                       ? "No leads yet. Run a search to get started."
                       : "No leads match your filters."}

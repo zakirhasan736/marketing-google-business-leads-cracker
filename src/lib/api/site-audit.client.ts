@@ -4,12 +4,16 @@ import type { SiteAuditScanResponse } from "@/lib/types/site-audit";
 export async function runSiteAuditApi(params: {
   url: string;
   lead: Lead;
+  strategy?: "mobile" | "desktop";
+  headlessRender?: boolean;
 }): Promise<SiteAuditScanResponse> {
   const response = await fetch("/api/site-audit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       url: params.url,
+      strategy: params.strategy ?? "mobile",
+      headlessRender: Boolean(params.headlessRender),
       placeId: params.lead.placeId,
       keyword: params.lead.searchCategory
         ? `${params.lead.searchCategory} near me`

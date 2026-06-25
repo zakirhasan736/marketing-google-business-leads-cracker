@@ -23,6 +23,9 @@ export function leadsToCsv(leads: Lead[]): string {
     "Map Link",
     "Status",
     "Notes",
+    "Heatmap Link",
+    "Heatmap Keyword",
+    "Site Audit Link",
     "Contact Page",
   ];
 
@@ -41,6 +44,9 @@ export function leadsToCsv(leads: Lead[]): string {
       getLeadMapsUrl(lead),
       lead.status || "New",
       lead.note || "",
+      lead.heatmapShareUrl || "",
+      lead.heatmapKeyword || "",
+      lead.siteAuditShareUrl || "",
       lead.contactPageUrl || "",
     ]
       .map((v) => escapeCsv(String(v)))
@@ -60,6 +66,29 @@ export function downloadCsv(csv: string, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+/** Leads that still need a first-time email scan (excludes already-scanned "No Email"). */
+export function leadsNeedingEmailScan(leads: Lead[]): Lead[] {
+  return leads.filter((lead) => !lead.email && lead.status !== "No Email");
+}
+
+/** @deprecated Use leadsNeedingEmailScan — kept for export naming compatibility */
 export function leadsMissingEmail(leads: Lead[]): Lead[] {
-  return leads.filter((lead) => !lead.email);
+  return leadsNeedingEmailScan(leads);
+}
+
+/** Leads previously marked No Email that can be re-scraped (optional, slower). */
+export function leadsToRescanEmail(leads: Lead[]): Lead[] {
+  return leads.filter(
+    (lead) =>
+      !lead.email &&
+      lead.status === "No Email" &&
+      Boolean(lead.website) &&
+      lead.website !== "N/A"
+  );
+}
+
+export function mergeLeadUpdates(current: Lead[], updated: Lead[]): Lead[] {
+  if (updated.length === 0) return current;
+  const byId = new Map(updated.map((lead) => [lead.placeId, lead]));
+  return current.map((lead) => byId.get(lead.placeId) ?? lead);
 }

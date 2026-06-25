@@ -8,4 +8,5 @@ export const LEAD_STATUSES = [
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
-export const EMAIL_SCAN_BATCH_SIZE = 50;
+/** One lead per request — safest for large lists behind gateway timeouts. */
+export const EMAIL_SCAN_BATCH_SIZE = 1;
