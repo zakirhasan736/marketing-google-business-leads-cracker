@@ -7,6 +7,26 @@ import type {
 
 const NOT_RANKED = 21;
 
+/** Always shown in the heatmap report "How we can help" section. */
+export const HEATMAP_ALWAYS_OPPORTUNITIES = [
+  "Build high quality back-links to dominate competitors",
+  "Google Maps citations for more visibility",
+] as const;
+
+export function mergeHeatmapOpportunities(dynamic: string[]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const item of [...HEATMAP_ALWAYS_OPPORTUNITIES, ...dynamic]) {
+    const key = item.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+
+  return merged;
+}
+
 function rankLabel(rank: number): string {
   return rank >= NOT_RANKED ? "20+" : String(rank);
 }
@@ -140,7 +160,7 @@ export function buildHeatmapInsights(params: {
     businessRankLabel: rankLabel(businessRank),
     visibilityScore,
     issues: issues.slice(0, 5),
-    opportunities: opportunities.slice(0, 4),
+    opportunities: mergeHeatmapOpportunities(opportunities.slice(0, 4)),
     pitch,
   };
 }

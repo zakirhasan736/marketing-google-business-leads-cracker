@@ -32,6 +32,7 @@ import {
   downloadHeatmapCsv,
   downloadHeatmapPdf,
 } from "@/lib/utils/export-heatmap";
+import { mergeHeatmapOpportunities } from "@/lib/utils/heatmap-insights";
 
 export interface HeatmapReportViewProps {
   lead: PublicHeatmapLeadSnapshot;
@@ -89,6 +90,9 @@ export function HeatmapReportView({
   const reviewCount = result?.business.userRatingsTotal ?? null;
   const rankStyle = centerCell ? getRankStyle(centerCell.rank) : null;
   const coverageInfo = result ? getHeatmapCoverageInfo(result) : null;
+  const howWeCanHelpItems = result
+    ? mergeHeatmapOpportunities(result.insights.opportunities)
+    : [];
 
   const mapsLead = {
     placeId: lead.placeId,
@@ -381,7 +385,7 @@ export function HeatmapReportView({
                 />
                 <InsightBlock
                   title="How we can help"
-                  items={result.insights.opportunities}
+                  items={howWeCanHelpItems}
                   variant="win"
                 />
               </div>

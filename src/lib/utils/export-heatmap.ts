@@ -1,6 +1,7 @@
 import type { HeatmapScanResult, PublicHeatmapLeadSnapshot } from "@/lib/types/heatmap";
 import { buildHeatmapPdf } from "@/lib/pdf/build-heatmap-pdf";
 import { downloadCsv } from "@/lib/utils/export-leads";
+import { mergeHeatmapOpportunities } from "@/lib/utils/heatmap-insights";
 
 function escapeCsv(value: string): string {  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
     return `"${value.replace(/"/g, '""')}"`;
@@ -108,7 +109,7 @@ export function heatmapToCsv(
   for (const issue of result.insights.issues) {
     sections.push([escapeCsv("Issue"), escapeCsv(issue)].join(","));
   }
-  for (const opp of result.insights.opportunities) {
+  for (const opp of mergeHeatmapOpportunities(result.insights.opportunities)) {
     sections.push([escapeCsv("Opportunity"), escapeCsv(opp)].join(","));
   }
   sections.push([escapeCsv("Pitch"), escapeCsv(result.insights.pitch)].join(","));

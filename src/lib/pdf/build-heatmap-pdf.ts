@@ -1,6 +1,7 @@
 import type { HeatmapScanResult, PublicHeatmapLeadSnapshot } from "@/lib/types/heatmap";
 import { getRankStyle } from "@/lib/utils/heatmap-colors";
 import { getHeatmapCoverageInfo } from "@/lib/utils/heatmap-coverage";
+import { mergeHeatmapOpportunities } from "@/lib/utils/heatmap-insights";
 import { PDF_CONTENT_WIDTH, PDF_THEME } from "@/lib/pdf/heatmap-pdf-theme";
 import { registerRobotoFonts } from "@/lib/pdf/register-roboto";
 import { renderHeatmapImageDataUrl } from "@/lib/utils/heatmap-export-image";
@@ -281,7 +282,7 @@ export async function buildHeatmapPdf(
 
   y = drawSectionTitle(doc, "How we can help", y);
   ensureSpace(24);
-  for (const opp of result.insights.opportunities) {
+  for (const opp of mergeHeatmapOpportunities(result.insights.opportunities)) {
     setRoboto(doc, "normal", 9);
     const lines = doc.splitTextToSize(`•  ${opp}`, PDF_CONTENT_WIDTH - 20);
     const boxH = Math.max(24, lines.length * 12 + 12);
