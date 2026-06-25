@@ -83,6 +83,10 @@ export function decodeCloudflareEmail(encoded: string): string | null {
   }
 }
 
+function stripInvisibleChars(text: string): string {
+  return text.replace(/[\u200B-\u200D\uFEFF\u00AD\u2060]/g, "");
+}
+
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
@@ -161,9 +165,19 @@ export function pickBestEmail(
 
 function collectFromText(text: string): string[] {
   const found: string[] = [];
-  const decoded = decodeHtmlEntities(text);
+  const stripped = stripInvisibleChars(text);
+  const decoded = decodeHtmlEntities(stripped);
+  const deobfuscatedWords = decoded
+    .replace(
+      /\b([a-zA-Z0-9._%+-]+)\s+at\s+([a-zA-Z0-9.-]+)\s+dot\s+([a-zA-Z]{2,})\b/gi,
+      "$1@$2.$3"
+    )
+    .replace(
+      /\b([a-zA-Z0-9._%+-]+)\s+AT\s+([a-zA-Z0-9.-]+)\s+DOT\s+([a-zA-Z]{2,})\b/g,
+      "$1@$2.$3"
+    );
 
-  for (const source of [text, decoded]) {
+  for (const source of [text, stripped, decoded, deobfuscatedWords]) {
     for (const match of source.matchAll(EMAIL_REGEX)) {
       found.push(match[0]);
     }
@@ -172,6 +186,76 @@ function collectFromText(text: string): string[] {
       pattern.lastIndex = 0;
       for (const match of source.matchAll(pattern)) {
         found.push(`${match[1]}@${match[2]}.${match[3]}`);
+      }
+    }
+  }
+
+  return found;
+}
+
+function extractReversedEmails(text: string): string[] {
+  const found: string[] = [];
+  const reversedPattern =
+    /([a-z]{2,}\.[a-z]{2,}@[a-zA-Z0-9._%+-]+)/gi;
+
+  for (const match of text.matchAll(reversedPattern)) {
+    const reversed = match[1].split("").reverse().join("");
+    found.push(...collectFromText(reversed));
+  }
+
+  return found;
+}
+
+function extractFromHexEncoded(text: string): string[] {
+  const found: string[] = [];
+  const hexPattern = /\\x([0-9a-f]{2})/gi;
+  const hexRuns = text.match(/(?:\\x[0-9a-f]{2}){6,}/gi) ?? [];
+
+  for (const run of hexRuns) {
+    try {
+      const decoded = run.replace(hexPattern, (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16))
+      );
+      found.push(...collectFromText(decoded));
+    } catch {
+      // skip invalid hex
+    }
+  }
+
+  return found;
+}
+
+function extractFromStringFromCharCode(script: string): string[] {
+  const found: string[] = [];
+  const charCodePattern =
+    /String\.fromCharCode\s*\(\s*([\d,\s]+)\s*\)/gi;
+
+  let match;
+  while ((match = charCodePattern.exec(script)) !== null) {
+    try {
+      const codes = match[1]
+        .split(",")
+        .map((c) => parseInt(c.trim(), 10))
+        .filter((n) => !Number.isNaN(n));
+      const decoded = String.fromCharCode(...codes);
+      found.push(...collectFromText(decoded));
+    } catch {
+      // skip
+    }
+  }
+
+  const multiCallPattern =
+    /String\.fromCharCode\s*\(\s*(\d+)\s*\)(?:\s*\+\s*String\.fromCharCode\s*\(\s*(\d+)\s*\))+/gi;
+  multiCallPattern.lastIndex = 0;
+  const concatParts = script.match(
+    /(?:String\.fromCharCode\s*\(\s*\d+\s*\)\s*){3,}/gi
+  );
+  if (concatParts) {
+    for (const part of concatParts) {
+      const nums = [...part.matchAll(/String\.fromCharCode\s*\(\s*(\d+)\s*\)/gi)]
+        .map((m) => parseInt(m[1], 10));
+      if (nums.length > 0) {
+        found.push(...collectFromText(String.fromCharCode(...nums)));
       }
     }
   }
@@ -189,6 +273,89 @@ function extractFromHtmlComments(html: string): string[] {
   return found;
 }
 
+function extractFromJsonScripts(html: string): string[] {
+  const found: string[] = [];
+  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+
+  let match;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const script = match[1].trim();
+    if (!script.startsWith("{") && !script.startsWith("[")) continue;
+
+    try {
+      const data = JSON.parse(script);
+      walkJsonForEmails(data, found);
+    } catch {
+      found.push(...collectFromText(script));
+    }
+  }
+
+  const nextDataPattern =
+    /<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let nextMatch;
+  while ((nextMatch = nextDataPattern.exec(html)) !== null) {
+    try {
+      walkJsonForEmails(JSON.parse(nextMatch[1]), found);
+    } catch {
+      found.push(...collectFromText(nextMatch[1]));
+    }
+  }
+
+  return found;
+}
+
+function extractFromNoscript(html: string): string[] {
+  const found: string[] = [];
+  const noscriptRegex = /<noscript[^>]*>([\s\S]*?)<\/noscript>/gi;
+  let match;
+  while ((match = noscriptRegex.exec(html)) !== null) {
+    found.push(...collectFromText(match[1]));
+  }
+  return found;
+}
+
+function extractFromAllDataAttributes($: cheerio.CheerioAPI): string[] {
+  const found: string[] = [];
+
+  $("*").each((_, el) => {
+    const attribs = (el as Element).attribs ?? {};
+    for (const [key, value] of Object.entries(attribs)) {
+      if (!key.startsWith("data-") || !value) continue;
+      if (
+        key.includes("email") ||
+        key.includes("mail") ||
+        key.includes("contact") ||
+        value.includes("@") ||
+        /^[0-9a-f]{6,}$/i.test(value)
+      ) {
+        found.push(...collectFromText(value));
+        const cfDecoded = decodeCloudflareEmail(value);
+        if (cfDecoded) found.push(cfDecoded);
+      }
+    }
+  });
+
+  return found;
+}
+
+function extractFromInlineStyles(html: string): string[] {
+  const found: string[] = [];
+  const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+  let match;
+  while ((match = styleRegex.exec(html)) !== null) {
+    found.push(...collectFromText(match[1]));
+  }
+  return found;
+}
+
+function extractFromTemplates($: cheerio.CheerioAPI): string[] {
+  const found: string[] = [];
+  $("template").each((_, el) => {
+    found.push(...collectFromText($(el).html() ?? ""));
+  });
+  return found;
+}
+
 function extractFromScripts(html: string): string[] {
   const found: string[] = [];
   const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
@@ -198,6 +365,9 @@ function extractFromScripts(html: string): string[] {
     const script = match[1];
 
     found.push(...collectFromText(script));
+    found.push(...extractFromHexEncoded(script));
+    found.push(...extractFromStringFromCharCode(script));
+    found.push(...extractReversedEmails(script));
 
     const concatPattern =
       /['"]([^'"]+)['"]\s*\+\s*['"]@['"]\s*\+\s*['"]([^'"]+)['"]/gi;
@@ -215,6 +385,15 @@ function extractFromScripts(html: string): string[] {
       found.push(`${revMatch[2]}@${revMatch[1]}`);
     }
 
+    const tripleConcat =
+      /['"]([^'"]*)['"]\s*\+\s*['"]([^'"]*)['"]\s*\+\s*['"]([^'"]*)['"]/gi;
+    tripleConcat.lastIndex = 0;
+    let tripleMatch;
+    while ((tripleMatch = tripleConcat.exec(script)) !== null) {
+      const joined = `${tripleMatch[1]}${tripleMatch[2]}${tripleMatch[3]}`;
+      if (joined.includes("@")) found.push(...collectFromText(joined));
+    }
+
     const atobPattern = /atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/gi;
     atobPattern.lastIndex = 0;
     let atobMatch;
@@ -224,6 +403,29 @@ function extractFromScripts(html: string): string[] {
       else found.push(...collectFromText(atobMatch[1]));
     }
 
+    const decodeUriPattern =
+      /decodeURIComponent\s*\(\s*['"]([^'"]+)['"]\s*\)/gi;
+    decodeUriPattern.lastIndex = 0;
+    let uriMatch;
+    while ((uriMatch = decodeUriPattern.exec(script)) !== null) {
+      try {
+        found.push(...collectFromText(decodeURIComponent(uriMatch[1])));
+      } catch {
+        found.push(...collectFromText(uriMatch[1]));
+      }
+    }
+
+    const unescapePattern = /unescape\s*\(\s*['"]([^'"]+)['"]\s*\)/gi;
+    unescapePattern.lastIndex = 0;
+    let unescMatch;
+    while ((unescMatch = unescapePattern.exec(script)) !== null) {
+      try {
+        found.push(...collectFromText(decodeURIComponent(unescMatch[1])));
+      } catch {
+        found.push(...collectFromText(unescMatch[1]));
+      }
+    }
+
     const mailtoInJs = /mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
     mailtoInJs.lastIndex = 0;
     let mailtoMatch;
@@ -231,7 +433,9 @@ function extractFromScripts(html: string): string[] {
       found.push(mailtoMatch[1]);
     }
 
-    const rot13Candidates = script.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+    const rot13Candidates = script.match(
+      /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+    );
     if (!rot13Candidates?.length) {
       const rot13Decoded = decodeRot13(script);
       found.push(...collectFromText(rot13Decoded));
@@ -541,13 +745,20 @@ export function extractEmailsFromHtml(
 
   candidates.push(...extractFromCloudflare($));
   candidates.push(...extractFromJsonLd(html));
+  candidates.push(...extractFromJsonScripts(html));
   candidates.push(...extractFromForms($));
   candidates.push(...extractFromMicrodata($));
   candidates.push(...extractFromMeta($));
   candidates.push(...extractFromAttributes($));
+  candidates.push(...extractFromAllDataAttributes($));
   candidates.push(...extractFromSplitElements($));
   candidates.push(...extractFromScripts(html));
   candidates.push(...extractFromHtmlComments(html));
+  candidates.push(...extractFromNoscript(html));
+  candidates.push(...extractFromInlineStyles(html));
+  candidates.push(...extractFromTemplates($));
+  candidates.push(...extractReversedEmails(html));
+  candidates.push(...extractFromHexEncoded(html));
 
   $("[data-email], [data-mail], [data-contact-email]").each((_, el) => {
     const attrs = [
