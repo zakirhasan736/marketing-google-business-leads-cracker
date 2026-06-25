@@ -1,11 +1,50 @@
 import * as cheerio from "cheerio";
+import type { AnyNode, Element } from "domhandler";
 
 const EMAIL_REGEX =
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
 const OBFUSCATED_PATTERNS = [
-  /([a-zA-Z0-9._%+-]+)\s*(?:\[at\]|\(at\)|@|\s+at\s+)\s*([a-zA-Z0-9.-]+)\s*(?:\[dot\]|\(dot\)|\.|\s+dot\s+)\s*([a-zA-Z]{2,})/gi,
+  /([a-zA-Z0-9._%+-]+)\s*(?:\[at\]|\(at\)|&#64;|@|\s+at\s+)\s*([a-zA-Z0-9.-]+)\s*(?:\[dot\]|\(dot\)|&#46;|\.|\s+dot\s+)\s*([a-zA-Z]{2,})/gi,
   /([a-zA-Z0-9._%+-]+)\s*\[at\]\s*([a-zA-Z0-9.-]+)\s*\[dot\]\s*([a-zA-Z]{2,})/gi,
+  /([a-zA-Z0-9._%+-]+)\s*@\s*([a-zA-Z0-9.-]+)\s*\.\s*([a-zA-Z]{2,})/gi,
+  /([a-zA-Z0-9._%+-]+)\s*(?:&#x40;|&commat;)\s*([a-zA-Z0-9.-]+)\s*(?:&#x2e;|&period;)\s*([a-zA-Z]{2,})/gi,
+];
+
+const CONTACT_REGION_SELECTORS = [
+  "footer",
+  "header",
+  "nav",
+  '[role="navigation"]',
+  '[role="contentinfo"]',
+  "aside",
+  ".footer",
+  ".header",
+  ".nav",
+  ".navbar",
+  ".navigation",
+  ".sidebar",
+  ".side-bar",
+  ".banner",
+  ".top-bar",
+  ".site-footer",
+  ".site-header",
+  "#footer",
+  "#header",
+  "#nav",
+  "#navigation",
+  "#contact",
+  ".contact",
+  ".contact-info",
+  ".contact-details",
+  ".contact-us",
+  '[class*="footer"]',
+  '[class*="header"]',
+  '[class*="contact"]',
+  '[class*="sidebar"]',
+  '[id*="footer"]',
+  '[id*="contact"]',
+  '[id*="header"]',
 ];
 
 const BLOCKED_EMAIL_PATTERNS = [
@@ -42,6 +81,37 @@ export function decodeCloudflareEmail(encoded: string): string | null {
   } catch {
     return null;
   }
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    )
+    .replace(/&commat;/gi, "@")
+    .replace(/&period;/gi, ".")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function decodeBase64Email(encoded: string): string | null {
+  try {
+    const decoded = Buffer.from(encoded, "base64").toString("utf-8");
+    const emails = collectFromText(decoded);
+    return emails.find(isValidBusinessEmail) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeRot13(text: string): string {
+  return text.replace(/[a-zA-Z]/g, (char) => {
+    const base = char <= "Z" ? 65 : 97;
+    return String.fromCharCode(((char.charCodeAt(0) - base + 13) % 26) + base);
+  });
 }
 
 export function isValidBusinessEmail(email: string): boolean {
@@ -91,17 +161,208 @@ export function pickBestEmail(
 
 function collectFromText(text: string): string[] {
   const found: string[] = [];
+  const decoded = decodeHtmlEntities(text);
 
-  for (const match of text.matchAll(EMAIL_REGEX)) {
-    found.push(match[0]);
-  }
+  for (const source of [text, decoded]) {
+    for (const match of source.matchAll(EMAIL_REGEX)) {
+      found.push(match[0]);
+    }
 
-  for (const pattern of OBFUSCATED_PATTERNS) {
-    pattern.lastIndex = 0;
-    for (const match of text.matchAll(pattern)) {
-      found.push(`${match[1]}@${match[2]}.${match[3]}`);
+    for (const pattern of OBFUSCATED_PATTERNS) {
+      pattern.lastIndex = 0;
+      for (const match of source.matchAll(pattern)) {
+        found.push(`${match[1]}@${match[2]}.${match[3]}`);
+      }
     }
   }
+
+  return found;
+}
+
+function extractFromHtmlComments(html: string): string[] {
+  const found: string[] = [];
+  const commentRegex = /<!--([\s\S]*?)-->/g;
+  let match;
+  while ((match = commentRegex.exec(html)) !== null) {
+    found.push(...collectFromText(match[1]));
+  }
+  return found;
+}
+
+function extractFromScripts(html: string): string[] {
+  const found: string[] = [];
+  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+
+  let match;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const script = match[1];
+
+    found.push(...collectFromText(script));
+
+    const concatPattern =
+      /['"]([^'"]+)['"]\s*\+\s*['"]@['"]\s*\+\s*['"]([^'"]+)['"]/gi;
+    concatPattern.lastIndex = 0;
+    let concatMatch;
+    while ((concatMatch = concatPattern.exec(script)) !== null) {
+      found.push(`${concatMatch[1]}@${concatMatch[2]}`);
+    }
+
+    const reverseConcat =
+      /['"]([^'"]+\.[a-z]{2,})['"]\s*\+\s*['"]@['"]\s*\+\s*['"]([^'"]+)['"]/gi;
+    reverseConcat.lastIndex = 0;
+    let revMatch;
+    while ((revMatch = reverseConcat.exec(script)) !== null) {
+      found.push(`${revMatch[2]}@${revMatch[1]}`);
+    }
+
+    const atobPattern = /atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/gi;
+    atobPattern.lastIndex = 0;
+    let atobMatch;
+    while ((atobMatch = atobPattern.exec(script)) !== null) {
+      const decoded = decodeBase64Email(atobMatch[1]);
+      if (decoded) found.push(decoded);
+      else found.push(...collectFromText(atobMatch[1]));
+    }
+
+    const mailtoInJs = /mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
+    mailtoInJs.lastIndex = 0;
+    let mailtoMatch;
+    while ((mailtoMatch = mailtoInJs.exec(script)) !== null) {
+      found.push(mailtoMatch[1]);
+    }
+
+    const rot13Candidates = script.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+    if (!rot13Candidates?.length) {
+      const rot13Decoded = decodeRot13(script);
+      found.push(...collectFromText(rot13Decoded));
+    }
+  }
+
+  return found;
+}
+
+function extractFromContactRegions($: cheerio.CheerioAPI): string[] {
+  const found: string[] = [];
+
+  for (const selector of CONTACT_REGION_SELECTORS) {
+    try {
+      $(selector).each((_, el) => {
+        const regionHtml = $(el).html() ?? "";
+        const regionText = $(el).text();
+        found.push(...collectFromText(regionHtml));
+        found.push(...collectFromText(regionText));
+        found.push(...extractFromSplitElements($, el as Element));
+        found.push(...extractFromAttributesInElement($, el as Element));
+      });
+    } catch {
+      // invalid selector — skip
+    }
+  }
+
+  return found;
+}
+
+function extractFromSplitElements(
+  $: cheerio.CheerioAPI,
+  root?: AnyNode
+): string[] {
+  const found: string[] = [];
+  const scope = root ? $(root) : $("body");
+
+  scope.find("a, span, p, div, li, td, strong, em, b, i").each((_, el) => {
+    const directChildren = $(el).children();
+    if (directChildren.length < 2) return;
+
+    const joined = directChildren
+      .map((_, child) => $(child).text().trim())
+      .get()
+      .join("");
+
+    if (joined.includes("@")) {
+      found.push(...collectFromText(joined.replace(/\s+/g, "")));
+    }
+
+    const joinedWithSpaces = directChildren
+      .map((_, child) => $(child).text().trim())
+      .get()
+      .join(" ");
+    if (joinedWithSpaces.includes("@") || joinedWithSpaces.includes(" at ")) {
+      found.push(...collectFromText(joinedWithSpaces));
+    }
+  });
+
+  $('[class*="email"], [class*="mail"], [id*="email"], [id*="mail"]').each(
+    (_, el) => {
+      const text = $(el).text().replace(/\s+/g, "");
+      if (text.includes("@")) {
+        found.push(...collectFromText(text));
+      }
+      found.push(...extractFromAttributesInElement($, el));
+    }
+  );
+
+  return found;
+}
+
+function extractFromAttributesInElement(
+  $: cheerio.CheerioAPI,
+  el: AnyNode
+): string[] {
+  const found: string[] = [];
+  const attrs = [
+    $(el).attr("title"),
+    $(el).attr("aria-label"),
+    $(el).attr("alt"),
+    $(el).attr("data-email"),
+    $(el).attr("data-mail"),
+    $(el).attr("data-contact-email"),
+    $(el).attr("data-enc-email"),
+    $(el).attr("data-cfemail"),
+    $(el).attr("onclick"),
+    $(el).attr("href"),
+    $(el).attr("content"),
+  ];
+
+  for (const attr of attrs) {
+    if (!attr) continue;
+    found.push(...collectFromText(attr));
+
+    if (attr.includes("cfemail") || /^[0-9a-f]{4,}$/i.test(attr)) {
+      const decoded = decodeCloudflareEmail(attr.replace(/.*#/, ""));
+      if (decoded) found.push(decoded);
+    }
+
+    try {
+      const decoded = decodeURIComponent(attr);
+      found.push(...collectFromText(decoded));
+    } catch {
+      // not URL-encoded
+    }
+  }
+
+  return found;
+}
+
+function extractFromAttributes($: cheerio.CheerioAPI): string[] {
+  const found: string[] = [];
+
+  $("[title], [aria-label], [alt], [onclick], [data-enc-email]").each(
+    (_, el) => {
+      found.push(...extractFromAttributesInElement($, el));
+    }
+  );
+
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    if (href.startsWith("mailto:")) return;
+
+    try {
+      const decoded = decodeURIComponent(href);
+      found.push(...collectFromText(decoded));
+    } catch {
+      found.push(...collectFromText(href));
+    }
+  });
 
   return found;
 }
@@ -222,6 +483,12 @@ function extractFromCloudflare($: cheerio.CheerioAPI): string[] {
     if (decoded) found.push(decoded);
   });
 
+  $("[data-cfemail]").each((_, el) => {
+    const encoded = $(el).attr("data-cfemail") ?? "";
+    const decoded = decodeCloudflareEmail(encoded);
+    if (decoded) found.push(decoded);
+  });
+
   return found;
 }
 
@@ -247,6 +514,10 @@ function extractFromMeta($: cheerio.CheerioAPI): string[] {
   return found;
 }
 
+function boostRegionCandidates(regionEmails: string[]): string[] {
+  return regionEmails.flatMap((email) => [email, email, email]);
+}
+
 export function extractEmailsFromHtml(
   html: string,
   siteHostname?: string
@@ -256,14 +527,27 @@ export function extractEmailsFromHtml(
 
   $('a[href^="mailto:"]').each((_, link) => {
     const href = $(link).attr("href")?.replace("mailto:", "").split("?")[0];
-    if (href) candidates.push(href);
+    if (href) {
+      try {
+        candidates.push(decodeURIComponent(href));
+      } catch {
+        candidates.push(href);
+      }
+    }
   });
+
+  const regionEmails = extractFromContactRegions($);
+  candidates.push(...boostRegionCandidates(regionEmails));
 
   candidates.push(...extractFromCloudflare($));
   candidates.push(...extractFromJsonLd(html));
   candidates.push(...extractFromForms($));
   candidates.push(...extractFromMicrodata($));
   candidates.push(...extractFromMeta($));
+  candidates.push(...extractFromAttributes($));
+  candidates.push(...extractFromSplitElements($));
+  candidates.push(...extractFromScripts(html));
+  candidates.push(...extractFromHtmlComments(html));
 
   $("[data-email], [data-mail], [data-contact-email]").each((_, el) => {
     const attrs = [
